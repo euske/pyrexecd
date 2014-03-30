@@ -459,6 +459,7 @@ def main(argv):
             sys.stdout.write(data)
         sock.close()
     else:
+        logging.info('Listening: %s:%s...' % (addr, port))
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         if force:
             try:
@@ -467,6 +468,7 @@ def main(argv):
             except socket.error:
                 pass
         sock.bind((addr, port))
+        sock.listen(1)
         sock.settimeout(0.01)
         PyRexec.initialize()
         app = PyRexec(sock, name=name, homedir=remotedir)
