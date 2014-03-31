@@ -193,53 +193,6 @@ class SysTrayApp(object):
         return
 
 
-def netstring(x):
-    return '%d:%s,' % (len(x), x)
-
-class NetstringParser(object):
-    
-    def __init__(self):
-        self.data = ''
-        self.length = 0
-        self._parse = self._parse_len
-        return
-        
-    def feed(self, s):
-        i = 0
-        while i < len(s):
-            i = self._parse(s, i)
-        return
-        
-    def _parse_len(self, s, i):
-        while i < len(s):
-            c = s[i]
-            if c < '0' or '9' < c:
-                self._parse = self._parse_sep
-                break
-            self.length *= 10
-            self.length += ord(c)-48
-            i += 1
-        return i
-        
-    def _parse_sep(self, s, i):
-        if s[i] != ':': raise SyntaxError(i)
-        self._parse = self._parse_data
-        return i+1
-        
-    def _parse_data(self, s, i):
-        n = max(self.length, len(s)-i)
-        self.data += s[i:i+n]
-        self.length -= n
-        if self.length == 0:
-            self._parse = self._parse_end
-        return i+n
-        
-    def _parse_end(self, s, i):
-        if s[i] != ',': raise SyntaxError(i)
-        self._parse = None
-        return i+1
-
-
 ##  PyRexec
 ##
 class PyRexec(SysTrayApp):
@@ -349,8 +302,9 @@ class PyRexec(SysTrayApp):
             except socket.timeout:
                 return
             if not s: raise self.Exit
-            i = s.index('\r\n')
-            if i < 0:
+            try:
+                i = s.index('\r\n')
+            except ValueError:
                 self._buf += s
                 return
             self._buf += s[:i]
@@ -365,7 +319,7 @@ class PyRexec(SysTrayApp):
             return
 
         def run_process(self, cmdline):
-            self.logger.info('run_process: %r' % cmdline)
+            self.logger.info('run_process: %r, cwd=%r' % (cmdline, self.homedir))
             return Popen(cmdline, stdin=PIPE, stdout=PIPE, stderr=STDOUT,
                          cwd=self.homedir, creationflags=CREATE_NO_WINDOW)
     
