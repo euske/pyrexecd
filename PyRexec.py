@@ -122,7 +122,9 @@ class SysTrayApp(object):
         return
 
     def open(self):
+        import win32gui
         self.logger.info('open')
+        win32gui.UpdateWindow(self._hwnd)
         return
 
     def run(self, timer=0):
@@ -131,7 +133,6 @@ class SysTrayApp(object):
         self.logger.info('run: timer=%r' % timer)
         if timer:
             ctypes.windll.User32.SetTimer(self._hwnd, 1, timer, None)
-        win32gui.UpdateWindow(self._hwnd)
         win32gui.PumpMessages()
         return
 
@@ -319,98 +320,92 @@ class PyRexec(SysTrayApp):
 
     class Server(object):
         
+        class Exit(Exception): pass
+
         def __init__(self, conn, peer, homedir='.'):
             self.name = 'server-%s-%s' % peer
             self.logger = logging.getLogger(self.name)
             self.logger.info('open')
             self.conn = conn
             self.homedir = homedir
-            self._buf = None
-            self._proc = None
+            self._buf = ''
+            self._task = None
             return
 
         def __repr__(self):
             return ('<%s: %s>' % (self.__class__.__name__, self.name))
 
         def close(self):
-            self.conn.send('bye.\r\n')
             self.conn.close()
             self.logger.info('close')
             return
 
-        def prompt(self):
-            self.conn.send('%s> ' % os.getcwd())
-            return
-
         def update(self, size=4096):
-            if self._proc is not None:
-                if self._proc.is_alive(): return
-                self._proc = None
-            if self._buf is None:
-                self.prompt()
-                self._buf = ''
+            if self._task is not None:
+                if not self._task.isAlive(): raise self.Exit
+                return
             try:
                 s = self.conn.recv(size)
             except socket.timeout:
                 return
             if not s: raise self.Exit
-            for c in s:
-                if c == '\n' and self._buf:
-                    self.execute(self._buf)
-                    self._buf = None
-                else:
-                    if self._buf is None:
-                        self._buf = ''
-                    self._buf += c
+            i = s.index('\r\n')
+            if i < 0:
+                self._buf += s
+                return
+            self._buf += s[:i]
+            try:
+                proc = self.run_process(self._buf)
+            except OSError, e:
+                self.conn.send(str(e)+'\r\n')
+                raise self.Exit
+            self.InputForwarder(self.conn, proc.stdin, buf=s[i+1:]).start()
+            self._task = self.OutputForwarder(proc.stdout, self.conn)
+            self._task.start()
             return
 
-        def execute(self, line):
-            line = line.strip()
-            if not line: return
-            self.logger.info('execute: %r' % line)
-            (cmd, _, args) = line.partition(' ')
-            if cmd in ('exit', '\x04'): raise self.Exit
-            if cmd == 'cd':
-                if args:
-                    d = args
-                else:
-                    d = self.homedir
-                try:
-                    os.chdir(d)
-                except OSError:
-                    self.conn.send('cannot chdir: %s\r\n' % d)
-                return
-            cmdline = 'cmd.exe /c '+line
-            proc = Popen(cmdline, stdin=PIPE, stdout=PIPE, stderr=STDOUT,
-                         creationflags=CREATE_NO_WINDOW)
-            proc.stdin.close()
-            self._proc = self.Forwarder(proc, proc.stdout, self.conn).start()
-            return
+        def run_process(self, cmdline):
+            self.logger.info('run_process: %r' % cmdline)
+            return Popen(cmdline, stdin=PIPE, stdout=PIPE, stderr=STDOUT,
+                         cwd=self.homedir, creationflags=CREATE_NO_WINDOW)
     
-        class Exit(Exception): pass
-
-        class Forwarder(Thread):
-            def __init__(self, proc, fp0, fp1, size=64):
+        class InputForwarder(Thread):
+            def __init__(self, sock, pipe, buf='', size=4096):
                 Thread.__init__(self)
-                self.proc = proc
+                self.sock = sock
+                self.pipe = pipe
+                self.buf = buf
                 self.size = size
-                if hasattr(fp0, 'recv'):
-                    self._read = fp0.recv
-                else:
-                    self._read = fp0.read
-                if hasattr(fp1, 'send'):
-                    self._write = fp1.send
-                else:
-                    self._write = fp1.write
                 return
-            def __repr__(self):
-                return ('<%s: proc=%r>' % (self.__class__.__name__, self.proc))
+            def run(self):
+                self.pipe.write(self.buf)
+                while 1:
+                    try:
+                        data = self.sock.recv(self.size)
+                        if not data: break
+                        self.pipe.write(data)
+                    except socket.timeout:
+                        continue
+                    except (IOError, socket.error):
+                        break
+                self.pipe.close()
+                return
+                
+        class OutputForwarder(Thread):
+            def __init__(self, pipe, sock, size=64):
+                Thread.__init__(self)
+                self.pipe = pipe
+                self.sock = sock
+                self.size = size
+                return
             def run(self):
                 while 1:
-                    data = self._read(self.size)
-                    if not data: break
-                    self._write(data)
-                #print 'terminate', self
+                    try:
+                        data = self.pipe.read(self.size)
+                        if not data: break
+                        self.sock.send(data)
+                    except (IOError, socket.error):
+                        break
                 return
 
 # main
@@ -432,7 +427,6 @@ def main(argv):
     force = False
     homedir = os.environ.get('HOME', '.')
     remotedir = os.environ.get('USERPROFILE', '.')
-    altsep = '\\'
     for (k, v) in opts:
         if k == '-f': force = True
         elif k == '-d': loglevel = logging.DEBUG
@@ -442,23 +436,24 @@ def main(argv):
         elif k == '-r': remotedir = v
     if args:
         addr = args.pop(0)
-    logging.basicConfig(level=loglevel, filename=logfile)
+    logging.basicConfig(level=loglevel, filename=logfile, filemode='a')
     if args:
+        # Run at Unix.
         logging.info('Connecting: %s:%s...' % (addr, port))
-        path = os.getcwd()        
+        path = os.getcwd()
         path = os.path.relpath(path, homedir)
-        path = remotedir+altsep+path.replace(os.path.sep, altsep)
+        path = path.replace(os.path.sep, '\\')
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.connect((addr, port))
-        sock.send('cd %s\r\n' % path)
-        sock.send(' '.join(args)+'\r\n')
-        sock.send('exit\r\n')
+        sock.send('cmd /c "cd %s & %s"' % (path, ' '.join(args)))
+        sock.send('\r\n')
         while 1:
             data = sock.recv(4096)
             if not data: break
             sys.stdout.write(data)
         sock.close()
     else:
+        # Run at Windows.
         logging.info('Listening: %s:%s...' % (addr, port))
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         if force:
