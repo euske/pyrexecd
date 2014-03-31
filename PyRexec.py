@@ -34,9 +34,9 @@ class SysTrayApp(object):
         klass.WNDCLASS.lpfnWndProc = {
             WM_RESTART: klass._restart,
             klass.WM_NOTIFY: klass._notify,
+            win32con.WM_CLOSE: klass._close,
             win32con.WM_DESTROY: klass._destroy,
             win32con.WM_COMMAND: klass._command,
-            win32con.WM_TIMER: klass._timer,
             }
         klass.CLASS_ATOM = win32gui.RegisterClass(klass.WNDCLASS)
         klass._instance = {}
@@ -87,6 +87,12 @@ class SysTrayApp(object):
         return True
 
     @classmethod
+    def _close(klass, hwnd, msg, wparam, lparam):
+        import win32gui
+        win32gui.DestroyWindow(hwnd)
+        return
+
+    @classmethod
     def _destroy(klass, hwnd, msg, wparam, lparam):
         import win32gui
         del klass._instance[hwnd]
@@ -100,12 +106,6 @@ class SysTrayApp(object):
         wid = win32gui.LOWORD(wparam)
         self = klass._instance[hwnd]
         self.choose(wid)
-        return
-
-    @classmethod
-    def _timer(klass, hwnd, msg, wparam, lparam):
-        self = klass._instance[hwnd]
-        self.update()
         return
 
     def __init__(self, name):
@@ -127,19 +127,21 @@ class SysTrayApp(object):
         win32gui.UpdateWindow(self._hwnd)
         return
 
-    def run(self, timer=0):
-        import ctypes
+    def run(self):
         import win32gui
-        self.logger.info('run: timer=%r' % timer)
-        if timer:
-            ctypes.windll.User32.SetTimer(self._hwnd, 1, timer, None)
+        self.logger.info('run')
         win32gui.PumpMessages()
         return
 
+    def idle(self):
+        import win32gui
+        return not win32gui.PumpWaitingMessages()
+
     def close(self):
+        import win32con
         import win32gui
         self.logger.info('close')
-        win32gui.DestroyWindow(self._hwnd)
+        win32gui.PostMessage(self._hwnd, win32con.WM_CLOSE, 0, 0)
         return
 
     def set_icon(self, icon):
@@ -182,10 +184,6 @@ class SysTrayApp(object):
         win32gui.InsertMenuItem(menu, 0, 1, item)
         return menu
 
-    def update(self):
-        print 'update'
-        return
-
     def choose(self, wid):
         self.logger.info('choose: wid=%r' % wid)
         if wid == self.IDI_QUIT:
@@ -193,9 +191,9 @@ class SysTrayApp(object):
         return
 
 
-##  PyRexec
+##  PyRexecTrayApp
 ##
-class PyRexec(SysTrayApp):
+class PyRexecTrayApp(SysTrayApp):
 
     @classmethod
     def initialize(klass):
@@ -214,47 +212,15 @@ class PyRexec(SysTrayApp):
             win32con.LR_LOADFROMFILE)
         return
 
-    def __init__(self, sock, name='PyRexec', **kwargs):
+    def __init__(self, name='PyRexec'):
         SysTrayApp.__init__(self, name)
-        self.kwargs = kwargs
-        (addr, port) = sock.getsockname()
-        self.set_text(u'Listening: %s:%r...' % (addr, port))
-        self._sock = sock
-        self._servers = []
         return
 
-    def update(self):
-        for server in self._servers[:]:
-            try:
-                server.update()
-            except server.Exit:
-                server.close()
-                self._servers.remove(server)
-                self.show_balloon(u'Disconnected', repr(server))
-                if not self._servers:
-                    self.set_icon(self.ICON_IDLE)
-        try:
-            (conn, peer) = self._sock.accept()
-        except socket.timeout:
-            return
-        conn.settimeout(0.01)
-        self.logger.info('connected: addr=%r, port=%r' % peer)
-        server = self.Server(conn, peer, **self.kwargs)
-        self._servers.append(server)
-        self.set_icon(self.ICON_BUSY)
-        self.show_balloon(u'Connected', repr(server))
-        return
-
-    def open(self):
-        SysTrayApp.open(self)
-        self.set_icon(self.ICON_IDLE)
-        return
-
-    def close(self):
-        while self._servers:
-            server = self._servers.pop()
-            server.close()
-        SysTrayApp.close(self)
+    def set_busy(self, busy):
+        if busy:
+            self.set_icon(self.ICON_BUSY)
+        else:
+            self.set_icon(self.ICON_IDLE)
         return
 
     def get_popup(self):
@@ -271,97 +237,156 @@ class PyRexec(SysTrayApp):
             self.close()
         return
 
-    class Server(object):
+
+##  PyRexecServer
+##
+class PyRexecServer(object):
+
+    class Exit(Exception): pass
+
+    def __init__(self, conn, peer, homedir='.'):
+        self.name = 'Server-%s-%s' % peer
+        self.logger = logging.getLogger(self.name)
+        self.logger.info('open')
+        self.conn = conn
+        self.homedir = homedir
+        self._buf = ''
+        self._task = None
+        return
+
+    def __repr__(self):
+        return ('<%s: %s>' % (self.__class__.__name__, self.name))
+
+    def close(self):
+        self.conn.close()
+        self.logger.info('close')
+        return
+
+    def update(self, size=4096):
+        if self._task is not None:
+            if not self._task.isAlive(): raise self.Exit
+            return
+        try:
+            s = self.conn.recv(size)
+        except socket.timeout:
+            return
+        if not s: raise self.Exit
+        try:
+            i = s.index('\r\n')
+        except ValueError:
+            self._buf += s
+            return
+        self._buf += s[:i]
+        try:
+            proc = self.run_process(self._buf)
+        except OSError, e:
+            self.conn.send(str(e)+'\r\n')
+            raise self.Exit
+        self.InputForwarder(self.conn, proc.stdin, buf=s[i+1:]).start()
+        self._task = self.OutputForwarder(proc.stdout, self.conn)
+        self._task.start()
+        return
+
+    def run_process(self, cmdline):
+        self.logger.info('run_process: %r, cwd=%r' % (cmdline, self.homedir))
+        return Popen(cmdline, stdin=PIPE, stdout=PIPE, stderr=STDOUT,
+                     cwd=self.homedir, creationflags=CREATE_NO_WINDOW)
+
+    class InputForwarder(Thread):
+        def __init__(self, sock, pipe, buf='', size=4096):
+            Thread.__init__(self)
+            self.sock = sock
+            self.pipe = pipe
+            self.buf = buf
+            self.size = size
+            return
+        def run(self):
+            self.pipe.write(self.buf)
+            while 1:
+                try:
+                    data = self.sock.recv(self.size)
+                    if not data: break
+                    self.pipe.write(data)
+                except socket.timeout:
+                    continue
+                except (IOError, socket.error):
+                    break
+            self.pipe.close()
+            return
+
+    class OutputForwarder(Thread):
+        def __init__(self, pipe, sock, size=64):
+            Thread.__init__(self)
+            self.pipe = pipe
+            self.sock = sock
+            self.size = size
+            return
+        def run(self):
+            while 1:
+                try:
+                    data = self.pipe.read(self.size)
+                    if not data: break
+                    self.sock.send(data)
+                except (IOError, socket.error):
+                    break
+            return
+
+# run_server
+def run_server(addr='0.0.0.0', port=8000, homedir='.', force=False):
+    logging.info('Listening: %s:%s...' % (addr, port))
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    if force:
+        try:
+            reuseaddr = sock.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, reuseaddr | 1)
+        except socket.error:
+            pass
+    sock.bind((addr, port))
+    sock.listen(1)
+    sock.settimeout(0.01)
+    app = PyRexecTrayApp()
+    app.set_text(u'Listening: %s:%r...' % (addr, port))
+    app.set_busy(False)
+    servers = []
+    while app.idle():
+        for server in servers[:]:
+            try:
+                server.update()
+            except server.Exit:
+                server.close()
+                servers.remove(server)
+                app.show_balloon(u'Disconnected', repr(server))
+                if not servers:
+                    app.set_busy(False)
+        try:
+            (conn, peer) = sock.accept()
+        except socket.timeout:
+            continue
+        conn.settimeout(0.01)
+        logging.info('Connected: addr=%r, port=%r' % peer)
+        server = PyRexecServer(conn, peer, homedir=homedir)
+        servers.append(server)
+        app.set_busy(True)
+        app.show_balloon(u'Connected', repr(server))
+    while servers:
+        server = servers.pop()
+        server.close()
+    return
         
-        class Exit(Exception): pass
-
-        def __init__(self, conn, peer, homedir='.'):
-            self.name = 'server-%s-%s' % peer
-            self.logger = logging.getLogger(self.name)
-            self.logger.info('open')
-            self.conn = conn
-            self.homedir = homedir
-            self._buf = ''
-            self._task = None
-            return
-
-        def __repr__(self):
-            return ('<%s: %s>' % (self.__class__.__name__, self.name))
-
-        def close(self):
-            self.conn.close()
-            self.logger.info('close')
-            return
-
-        def update(self, size=4096):
-            if self._task is not None:
-                if not self._task.isAlive(): raise self.Exit
-                return
-            try:
-                s = self.conn.recv(size)
-            except socket.timeout:
-                return
-            if not s: raise self.Exit
-            try:
-                i = s.index('\r\n')
-            except ValueError:
-                self._buf += s
-                return
-            self._buf += s[:i]
-            try:
-                proc = self.run_process(self._buf)
-            except OSError, e:
-                self.conn.send(str(e)+'\r\n')
-                raise self.Exit
-            self.InputForwarder(self.conn, proc.stdin, buf=s[i+1:]).start()
-            self._task = self.OutputForwarder(proc.stdout, self.conn)
-            self._task.start()
-            return
-
-        def run_process(self, cmdline):
-            self.logger.info('run_process: %r, cwd=%r' % (cmdline, self.homedir))
-            return Popen(cmdline, stdin=PIPE, stdout=PIPE, stderr=STDOUT,
-                         cwd=self.homedir, creationflags=CREATE_NO_WINDOW)
+# run_client
+def run_client(cmdline, addr='127.0.0.1', port=8000):
+    logging.info('Connecting: %s:%s...' % (addr, port))
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.connect((addr, port))
+    logging.info('Sending: %r' % cmdline)
+    sock.send(cmdline+'\r\n')
+    while 1:
+        data = sock.recv(4096)
+        if not data: break
+        sys.stdout.write(data)
+    sock.close()
+    return
     
-        class InputForwarder(Thread):
-            def __init__(self, sock, pipe, buf='', size=4096):
-                Thread.__init__(self)
-                self.sock = sock
-                self.pipe = pipe
-                self.buf = buf
-                self.size = size
-                return
-            def run(self):
-                self.pipe.write(self.buf)
-                while 1:
-                    try:
-                        data = self.sock.recv(self.size)
-                        if not data: break
-                        self.pipe.write(data)
-                    except socket.timeout:
-                        continue
-                    except (IOError, socket.error):
-                        break
-                self.pipe.close()
-                return
-                
-        class OutputForwarder(Thread):
-            def __init__(self, pipe, sock, size=64):
-                Thread.__init__(self)
-                self.pipe = pipe
-                self.sock = sock
-                self.size = size
-                return
-            def run(self):
-                while 1:
-                    try:
-                        data = self.pipe.read(self.size)
-                        if not data: break
-                        self.sock.send(data)
-                    except (IOError, socket.error):
-                        break
-                return
-
 # main
 def main(argv):
     import getopt
@@ -373,7 +398,6 @@ def main(argv):
         (opts, args) = getopt.getopt(argv[1:], 'dfl:h:r:p:')
     except getopt.GetoptError:
         return usage()
-    name = 'PyRexec'
     loglevel = logging.INFO
     logfile = None
     port = 8000
@@ -382,8 +406,8 @@ def main(argv):
     homedir = os.environ.get('HOME', '.')
     remotedir = os.environ.get('USERPROFILE', '.')
     for (k, v) in opts:
-        if k == '-f': force = True
-        elif k == '-d': loglevel = logging.DEBUG
+        if k == '-d': loglevel = logging.DEBUG
+        elif k == '-f': force = True
         elif k == '-l': logfile = v
         elif k == '-p': port = int(v)
         elif k == '-h': homedir = v
@@ -393,34 +417,14 @@ def main(argv):
     logging.basicConfig(level=loglevel, filename=logfile, filemode='a')
     if args:
         # Run at Unix.
-        logging.info('Connecting: %s:%s...' % (addr, port))
         path = os.getcwd()
         path = os.path.relpath(path, homedir)
         path = path.replace(os.path.sep, '\\')
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.connect((addr, port))
-        sock.send('cmd /c "cd %s & %s"' % (path, ' '.join(args)))
-        sock.send('\r\n')
-        while 1:
-            data = sock.recv(4096)
-            if not data: break
-            sys.stdout.write(data)
-        sock.close()
+        cmdline = 'cmd /c "cd %s & %s"' % (path, ' '.join(args))
+        run_client(cmdline, addr=addr, port=port)
     else:
         # Run at Windows.
-        logging.info('Listening: %s:%s...' % (addr, port))
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        if force:
-            try:
-                reuseaddr = sock.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR)
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, reuseaddr | 1)
-            except socket.error:
-                pass
-        sock.bind((addr, port))
-        sock.listen(1)
-        sock.settimeout(0.01)
-        PyRexec.initialize()
-        app = PyRexec(sock, name=name, homedir=remotedir)
-        app.run(timer=50)
+        PyRexecTrayApp.initialize()
+        run_server(addr=addr, port=port, homedir=remotedir, force=force)
     return
 if __name__ == '__main__': sys.exit(main(sys.argv))
