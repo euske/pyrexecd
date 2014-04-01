@@ -196,17 +196,17 @@ class SysTrayApp(object):
 class PyRexecTrayApp(SysTrayApp):
 
     @classmethod
-    def initialize(klass):
+    def initialize(klass, basedir='.'):
         import win32con
         import win32gui
         SysTrayApp.initialize()
         klass.ICON_IDLE = win32gui.LoadImage(
-            0, 'PyRexec.ico',
+            0, os.path.join(basedir, 'PyRexec.ico'),
             win32con.IMAGE_ICON,
             win32con.LR_DEFAULTSIZE, win32con.LR_DEFAULTSIZE,
             win32con.LR_LOADFROMFILE)
         klass.ICON_BUSY = win32gui.LoadImage(
-            0, 'PyRexecConnected.ico',
+            0, os.path.join(basedir, 'PyRexecConnected.ico'),
             win32con.IMAGE_ICON,
             win32con.LR_DEFAULTSIZE, win32con.LR_DEFAULTSIZE,
             win32con.LR_LOADFROMFILE)
@@ -424,7 +424,7 @@ def main(argv):
         run_client(cmdline, addr=addr, port=port)
     else:
         # Run at Windows.
-        PyRexecTrayApp.initialize()
+        PyRexecTrayApp.initialize(basedir=os.path.dirname(argv[0]))
         run_server(addr=addr, port=port, homedir=remotedir, force=force)
     return
 if __name__ == '__main__': sys.exit(main(sys.argv))
