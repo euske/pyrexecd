@@ -7,6 +7,7 @@ import logging
 from subprocess import Popen, PIPE, STDOUT
 from threading import Thread
 CREATE_NO_WINDOW = 0x08000000
+REXECD_PORT = 2222
 
 
 ##  SysTrayApp
@@ -332,7 +333,7 @@ class PyRexecServer(object):
             return
 
 # run_server
-def run_server(addr='0.0.0.0', port=8000, homedir='.', force=False):
+def run_server(addr='127.0.0.1', port=REXECD_PORT, homedir='.', force=False):
     logging.info('Listening: %s:%s...' % (addr, port))
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     if force:
@@ -374,7 +375,7 @@ def run_server(addr='0.0.0.0', port=8000, homedir='.', force=False):
     return
         
 # run_client
-def run_client(cmdline, addr='127.0.0.1', port=8000):
+def run_client(cmdline, addr='127.0.0.1', port=REXECD_PORT):
     logging.info('Connecting: %s:%s...' % (addr, port))
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.connect((addr, port))
@@ -400,8 +401,8 @@ def main(argv):
         return usage()
     loglevel = logging.INFO
     logfile = None
-    port = 8000
-    addr = '0.0.0.0'
+    port = REXECD_PORT
+    addr = '127.0.0.1'
     force = False
     homedir = os.environ.get('HOME', '.')
     remotedir = os.environ.get('USERPROFILE', '.')
