@@ -1,13 +1,22 @@
 #!/usr/bin/env python
+
+# Prerequisites:
+#   Python 2.7 (https://www.python.org/downloads/)
+#   Python for Windows (http://sourceforge.net/projects/pywin32/)
+#   PyCrypto (http://www.voidspace.org.uk/python/modules.shtml#pycrypto)
+#   Python-ecdsa (https://pypi.python.org/pypi/ecdsa)
+#   Paramiko (https://github.com/paramiko/paramiko)
+
 import sys
 import os
 import os.path
 import socket
 import logging
+import paramiko
 from subprocess import Popen, PIPE, STDOUT
 from threading import Thread
+from paramiko.py3compat import decodebytes
 CREATE_NO_WINDOW = 0x08000000
-REXECD_PORT = 2222
 
 
 ##  SysTrayApp
@@ -239,87 +248,106 @@ class PyRexecTrayApp(SysTrayApp):
         return
 
 
-##  PyRexecServer
+##  PyRexecSession
 ##
-class PyRexecServer(object):
+class PyRexecSession(paramiko.ServerInterface):
 
     class Exit(Exception): pass
 
-    def __init__(self, conn, peer, homedir='.'):
-        self.name = 'Server-%s-%s' % peer
+    def __init__(self, peer, username, pubkeys, homedir, cmdline):
+        
+        self.peer = peer
+        self.name = 'Session-%s-%s' % peer
         self.logger = logging.getLogger(self.name)
-        self.logger.info('open')
-        self.conn = conn
+        self.username = username
+        self.pubkeys = pubkeys
         self.homedir = homedir
-        self._buf = ''
-        self._task = None
+        self.cmdline = cmdline
+        self._chan = None
+        self._proc = None
+        self._task1 = None
+        self._task2 = None
         return
 
     def __repr__(self):
         return ('<%s: %s>' % (self.__class__.__name__, self.name))
 
+    def get_peer(self):
+        return '%s:%s' % self.peer
+
+    def get_allowed_auths(self, username):
+        if username == self.username:
+            return 'publickey'
+        return ''
+    
+    def check_auth_publickey(self, username, key):
+        if username == self.username:
+            for k in self.pubkeys:
+                if k == key: return paramiko.AUTH_SUCCESSFUL
+        return paramiko.AUTH_FAILED
+    
+    def check_channel_request(self, kind, chanid):
+        if kind == 'session':
+            return paramiko.OPEN_SUCCEEDED
+        return paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
+    
+    def check_channel_pty_request(self, channel, term, width, height,
+                                  pixelwidth, pixelheight, modes):
+        print 'pty', (term, width, height, pixelwidth, pixelheight)
+        return True
+    
+    def check_channel_shell_request(self, channel):
+        self.open(channel)
+        return True
+
+    def is_open(self):
+        return (self._chan is not None and
+                ((self._task1 is not None and self._task1.isAlive()) or
+                 (self._task2 is not None and self._task2.isAlive())))
+    
+    def open(self, chan):
+        self.logger.info('open')
+        self._chan = chan
+        self._chan.send('hello, you.\r\n')
+        self._proc = Popen(self.cmdline, stdin=PIPE, stdout=PIPE, stderr=STDOUT,
+                           cwd=self.homedir, creationflags=CREATE_NO_WINDOW)
+        self._task1 = self.ChanForwarder(self._chan, self._proc.stdin)
+        self._task1.start()
+        self._task2 = self.PipeForwarder(self._proc.stdout, self._chan)
+        self._task2.start()
+        return
+    
     def close(self):
-        self.conn.close()
+        self._chan.close()
         self.logger.info('close')
         return
 
-    def update(self, size=4096):
-        if self._task is not None:
-            if not self._task.isAlive(): raise self.Exit
-            return
-        try:
-            s = self.conn.recv(size)
-        except socket.timeout:
-            return
-        if not s: raise self.Exit
-        try:
-            i = s.index('\r\n')
-        except ValueError:
-            self._buf += s
-            return
-        self._buf += s[:i]
-        try:
-            proc = self.run_process(self._buf)
-        except OSError, e:
-            self.conn.send(str(e)+'\r\n')
-            raise self.Exit
-        self.InputForwarder(self.conn, proc.stdin, buf=s[i+1:]).start()
-        self._task = self.OutputForwarder(proc.stdout, self.conn)
-        self._task.start()
-        return
-
-    def run_process(self, cmdline):
-        self.logger.info('run_process: %r, cwd=%r' % (cmdline, self.homedir))
-        return Popen(cmdline, stdin=PIPE, stdout=PIPE, stderr=STDOUT,
-                     cwd=self.homedir, creationflags=CREATE_NO_WINDOW)
-
-    class InputForwarder(Thread):
-        def __init__(self, sock, pipe, buf='', size=4096):
+    class ChanForwarder(Thread):
+        def __init__(self, chan, pipe, size=64):
             Thread.__init__(self)
-            self.sock = sock
+            self.chan = chan
             self.pipe = pipe
-            self.buf = buf
             self.size = size
             return
         def run(self):
-            self.pipe.write(self.buf)
             while 1:
                 try:
-                    data = self.sock.recv(self.size)
+                    data = self.chan.recv(self.size)
                     if not data: break
+                    # xxx do echoback
+                    data = data.replace('\r', '\r\n')
                     self.pipe.write(data)
                 except socket.timeout:
                     continue
                 except (IOError, socket.error):
                     break
-            self.pipe.close()
             return
-
-    class OutputForwarder(Thread):
-        def __init__(self, pipe, sock, size=64):
+        
+    class PipeForwarder(Thread):
+        def __init__(self, pipe, chan, size=1):
             Thread.__init__(self)
             self.pipe = pipe
-            self.sock = sock
+            self.chan = chan
             self.size = size
             return
         def run(self):
@@ -327,105 +355,130 @@ class PyRexecServer(object):
                 try:
                     data = self.pipe.read(self.size)
                     if not data: break
-                    self.sock.send(data)
+                    self.chan.send(data)
+                except socket.timeout:
+                    continue
                 except (IOError, socket.error):
                     break
             return
 
+# get_host_key
+def get_host_key(path):
+    if path.endswith('rsa_key'):
+        f = paramiko.RSAKey
+    elif path.endswith('dsa_key'):
+        f = paramiko.DSSKey
+    elif path.endswith('ecdsa_key'):
+        f = paramiko.ECDSAKay
+    else:
+        raise ValueError(path)
+    return f(filename=path)
+
+# get_authorized_keys
+def get_authorized_keys(path):
+    keys = []
+    fp = file(path)
+    for line in fp:
+        (t,_,data) = line.partition(' ')
+        if t == 'ssh-rsa':
+            f = paramiko.RSAKey
+        elif t == 'ssh-dss':
+            f = paramiko.DSSKey
+        elif t.startswith('ecdsa-'):
+            f = paramiko.ECDSAKey
+        else:
+            continue
+        data = decodebytes(data)
+        keys.append(f(data=data))
+    fp.close()
+    return keys
+
 # run_server
-def run_server(addr='127.0.0.1', port=REXECD_PORT, homedir='.', force=False):
+def run_server(hostkeys, username, pubkeys, homedir, cmdline,
+               addr='127.0.0.1', port=2222):
     logging.info('Listening: %s:%s...' % (addr, port))
+    print (hostkeys, username, pubkeys)
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    if force:
-        try:
-            reuseaddr = sock.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, reuseaddr | 1)
-        except socket.error:
-            pass
+    try:
+        reuseaddr = sock.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, reuseaddr | 1)
+    except socket.error:
+        pass
     sock.bind((addr, port))
-    sock.listen(1)
-    sock.settimeout(0.01)
+    sock.listen(5)
+    sock.settimeout(0.05)
     app = PyRexecTrayApp()
     app.set_text(u'Listening: %s:%r...' % (addr, port))
     app.set_busy(False)
-    servers = []
+    sessions = []
     while app.idle():
-        for server in servers[:]:
-            try:
-                server.update()
-            except server.Exit:
-                server.close()
-                servers.remove(server)
-                app.show_balloon(u'Disconnected', repr(server))
-                if not servers:
-                    app.set_busy(False)
+        for session in sessions[:]:
+            if session.is_open(): continue
+            session.close()
+            sessions.remove(session)
+            app.show_balloon(u'Disconnected', session.get_peer())
+            if not sessions:
+                app.set_busy(False)
         try:
             (conn, peer) = sock.accept()
         except socket.timeout:
             continue
-        conn.settimeout(0.01)
+        conn.settimeout(0.05)
         logging.info('Connected: addr=%r, port=%r' % peer)
-        server = PyRexecServer(conn, peer, homedir=homedir)
-        servers.append(server)
-        app.set_busy(True)
-        app.show_balloon(u'Connected', repr(server))
-    while servers:
-        server = servers.pop()
-        server.close()
+        t = paramiko.Transport(conn)
+        t.load_server_moduli()
+        for k in hostkeys:
+            t.add_server_key(k)
+        session = PyRexecSession(peer, username, pubkeys, homedir, cmdline)
+        t.start_server(server=session)
+        t.accept(10)
+        if session.is_open():
+            sessions.append(session)
+            app.show_balloon(u'Connected', session.get_peer())
+            app.set_busy(True)
+    while sessions:
+        session = sessions.pop()
+        session.close()
     return
-        
-# run_client
-def run_client(cmdline, addr='127.0.0.1', port=REXECD_PORT):
-    logging.info('Connecting: %s:%s...' % (addr, port))
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.connect((addr, port))
-    logging.info('Sending: %r' % cmdline)
-    sock.send(cmdline+'\r\n')
-    while 1:
-        data = sock.recv(4096)
-        if not data: break
-        sys.stdout.write(data)
-    sock.close()
-    return
-    
+
 # main
 def main(argv):
     import getopt
     def usage():
-        print ('usage: %s [-d] [-f] [-l logfile] [-h homedir] [-r remotedir]'
-               ' [-p port] [addr [cmd ...]]' % argv[0])
+        print ('usage: %s [-d] [-l logfile] [-L addr] [-p port]'
+               ' [-u username] [-a authkeys] [-h homedir] [-c cmdline]' % argv[0])
         return 100
     try:
-        (opts, args) = getopt.getopt(argv[1:], 'dfl:h:r:p:')
+        (opts, args) = getopt.getopt(argv[1:], 'dl:L:p:u:a:h:c:')
     except getopt.GetoptError:
         return usage()
     loglevel = logging.INFO
     logfile = None
-    port = REXECD_PORT
-    addr = '127.0.0.1'
-    force = False
-    homedir = os.environ.get('HOME', '.')
-    remotedir = os.environ.get('USERPROFILE', '.')
+    port = 2222
+    addr = '0.0.0.0'
+    pubkeys = []
+    username = os.environ.get('USERNAME', 'unknown')
+    homedir = os.environ.get('USERPROFILE', '.')
+    cmdline = 'cmd'
     for (k, v) in opts:
         if k == '-d': loglevel = logging.DEBUG
-        elif k == '-f': force = True
         elif k == '-l': logfile = v
+        elif k == '-L': addr = v
         elif k == '-p': port = int(v)
+        elif k == '-u': username = v
+        elif k == '-a':
+            pubkeys.extend(get_authorized_keys(v))
         elif k == '-h': homedir = v
-        elif k == '-r': remotedir = v
-    if args:
-        addr = args.pop(0)
+        elif k == '-c': cmdline = v
+    hostkeys = []
+    for path in args:
+        hostkeys.append(get_host_key(path))
+    if not hostkeys:
+        print 'no hostkey is found!'
+        return 111
     logging.basicConfig(level=loglevel, filename=logfile, filemode='a')
-    if args:
-        # Run at Unix.
-        path = os.getcwd()
-        path = os.path.relpath(path, homedir)
-        path = path.replace(os.path.sep, '\\')
-        cmdline = 'cmd /c "cd %s & %s"' % (path, ' '.join(args))
-        run_client(cmdline, addr=addr, port=port)
-    else:
-        # Run at Windows.
-        PyRexecTrayApp.initialize(basedir=os.path.dirname(argv[0]))
-        run_server(addr=addr, port=port, homedir=remotedir, force=force)
+    PyRexecTrayApp.initialize(basedir=os.path.dirname(argv[0]))
+    run_server(hostkeys, username, pubkeys, homedir, cmdline,
+               addr=addr, port=port)
     return
 if __name__ == '__main__': sys.exit(main(sys.argv))
