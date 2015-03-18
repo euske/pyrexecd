@@ -7,6 +7,9 @@
 #   Python-ecdsa (https://pypi.python.org/pypi/ecdsa)
 #   Paramiko (https://github.com/paramiko/paramiko)
 
+# Usage:
+#   python pyrexec.py ssh_host_rsa_key
+
 import sys
 import os
 import os.path
@@ -265,8 +268,7 @@ class PyRexecSession(paramiko.ServerInterface):
         self.cmdline = cmdline
         self._chan = None
         self._proc = None
-        self._task1 = None
-        self._task2 = None
+        self._tasks = None
         return
 
     def __repr__(self):
@@ -301,9 +303,10 @@ class PyRexecSession(paramiko.ServerInterface):
         return True
 
     def is_open(self):
-        return (self._chan is not None and
-                ((self._task1 is not None and self._task1.isAlive()) or
-                 (self._task2 is not None and self._task2.isAlive())))
+        if self._tasks is None: return False
+        for task in self._tasks:
+            if task.isAlive(): return True
+        return False
     
     def open(self, chan):
         self.logger.info('open')
@@ -311,10 +314,12 @@ class PyRexecSession(paramiko.ServerInterface):
         self._chan.send('hello, you.\r\n')
         self._proc = Popen(self.cmdline, stdin=PIPE, stdout=PIPE, stderr=STDOUT,
                            cwd=self.homedir, creationflags=CREATE_NO_WINDOW)
-        self._task1 = self.ChanForwarder(self._chan, self._proc.stdin)
-        self._task1.start()
-        self._task2 = self.PipeForwarder(self._proc.stdout, self._chan)
-        self._task2.start()
+        self._tasks = (
+            self.ChanForwarder(self, self._chan, self._proc.stdin),
+            self.PipeForwarder(self, self._proc.stdout, self._chan),
+        )
+        for task in self._tasks:
+            task.start()
         return
     
     def close(self):
@@ -323,8 +328,9 @@ class PyRexecSession(paramiko.ServerInterface):
         return
 
     class ChanForwarder(Thread):
-        def __init__(self, chan, pipe, size=64):
+        def __init__(self, session, chan, pipe, size=64):
             Thread.__init__(self)
+            self.session = session
             self.chan = chan
             self.pipe = pipe
             self.size = size
@@ -334,18 +340,21 @@ class PyRexecSession(paramiko.ServerInterface):
                 try:
                     data = self.chan.recv(self.size)
                     if not data: break
-                    # xxx do echoback
+                    # xxx do proper echoback
                     data = data.replace('\r', '\r\n')
+                    self.chan.send(data)
                     self.pipe.write(data)
                 except socket.timeout:
                     continue
                 except (IOError, socket.error):
                     break
+            self.session.logger.info('chan end')
             return
         
     class PipeForwarder(Thread):
-        def __init__(self, pipe, chan, size=1):
+        def __init__(self, session, pipe, chan, size=1):
             Thread.__init__(self)
+            self.session = session
             self.pipe = pipe
             self.chan = chan
             self.size = size
@@ -360,6 +369,7 @@ class PyRexecSession(paramiko.ServerInterface):
                     continue
                 except (IOError, socket.error):
                     break
+            self.session.logger.info('pipe end')
             return
 
 # get_host_key
@@ -456,9 +466,9 @@ def main(argv):
     logfile = None
     port = 2222
     addr = '0.0.0.0'
-    pubkeys = []
     username = os.environ.get('USERNAME', 'unknown')
     homedir = os.environ.get('USERPROFILE', '.')
+    pubkeys = get_authorized_keys('authorized_keys')
     cmdline = 'cmd'
     for (k, v) in opts:
         if k == '-d': loglevel = logging.DEBUG
