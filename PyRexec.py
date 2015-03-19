@@ -257,10 +257,9 @@ class PyRexecSession(paramiko.ServerInterface):
 
     class Exit(Exception): pass
 
-    def __init__(self, peer, username, pubkeys, homedir, cmdline):
-        
+    def __init__(self, peer, name, username, pubkeys, homedir, cmdline):
         self.peer = peer
-        self.name = 'Session-%s-%s' % peer
+        self.name = name
         self.logger = logging.getLogger(self.name)
         self.username = username
         self.pubkeys = pubkeys
@@ -283,35 +282,40 @@ class PyRexecSession(paramiko.ServerInterface):
         return ''
     
     def check_auth_publickey(self, username, key):
+        self.logger.debug('check_auth_publickey: %r' % username)
         if username == self.username:
             for k in self.pubkeys:
                 if k == key: return paramiko.AUTH_SUCCESSFUL
         return paramiko.AUTH_FAILED
     
     def check_channel_request(self, kind, chanid):
+        self.logger.debug('check_channel_request: %r' % kind)
         if kind == 'session':
             return paramiko.OPEN_SUCCEEDED
         return paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
     
-    def check_channel_pty_request(self, channel, term, width, height,
-                                  pixelwidth, pixelheight, modes):
-        print 'pty', (term, width, height, pixelwidth, pixelheight)
+    def check_channel_pty_request(
+            self, channel, term, width, height,
+            pixelwidth, pixelheight, modes):
+        self.logger.debug('check_channel_pty_request: %r, %rx%r, %rx%r' %
+                          (term, width, height, pixelwidth, pixelheight))
         return True
     
     def check_channel_shell_request(self, channel):
+        self.logger.debug('check_channel_shell_request')
         self.open(channel)
         return True
 
     def is_open(self):
         if self._tasks is None: return False
         for task in self._tasks:
-            if task.isAlive(): return True
-        return False
+            if not task.isAlive(): return False
+        return True
     
     def open(self, chan):
-        self.logger.info('open')
+        self.logger.info('open: %r' % chan)
         self._chan = chan
-        self._chan.send('hello, you.\r\n')
+        self._chan.settimeout(0.05)
         self._proc = Popen(self.cmdline, stdin=PIPE, stdout=PIPE, stderr=STDOUT,
                            cwd=self.homedir, creationflags=CREATE_NO_WINDOW)
         self._tasks = (
@@ -323,8 +327,13 @@ class PyRexecSession(paramiko.ServerInterface):
         return
     
     def close(self):
+        self.logger.info('close: %r' % self._chan)
+        self._proc.stdin.close()
+        self._proc.stdout.close()
+        status = self._proc.wait()
+        self.logger.info('exit status: %r' % status)
+        self._chan.send_exit_status(status)
         self._chan.close()
-        self.logger.info('close')
         return
 
     class ChanForwarder(Thread):
@@ -406,8 +415,9 @@ def get_authorized_keys(path):
 # run_server
 def run_server(hostkeys, username, pubkeys, homedir, cmdline,
                addr='127.0.0.1', port=2222):
+    logging.info('Hostkeys: %d' % len(hostkeys))
+    logging.info('Username: %r (pubkeys:%d)' % (username, len(pubkeys)))
     logging.info('Listening: %s:%s...' % (addr, port))
-    print (hostkeys, username, pubkeys)
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         reuseaddr = sock.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR)
@@ -439,7 +449,8 @@ def run_server(hostkeys, username, pubkeys, homedir, cmdline,
         t.load_server_moduli()
         for k in hostkeys:
             t.add_server_key(k)
-        session = PyRexecSession(peer, username, pubkeys, homedir, cmdline)
+        name = 'Session-%s-%s' % peer
+        session = PyRexecSession(peer, name, username, pubkeys, homedir, cmdline)
         t.start_server(server=session)
         t.accept(10)
         if session.is_open():
@@ -469,7 +480,7 @@ def main(argv):
     username = os.environ.get('USERNAME', 'unknown')
     homedir = os.environ.get('USERPROFILE', '.')
     pubkeys = get_authorized_keys('authorized_keys')
-    cmdline = 'cmd'
+    cmdline = 'cmd /Q'
     for (k, v) in opts:
         if k == '-d': loglevel = logging.DEBUG
         elif k == '-l': logfile = v
