@@ -1,10 +1,10 @@
 PyRexecd
 ========
 
-PyRexecd is a telnet/rexec daemon for Windows. It can be used to run
-Windows programs remotely from a Unix machine.
+PyRexecd is a simple SSH server for Windows.
+It can be used to run Windows programs remotely from a Unix machine.
 
-**WARNING:** There's no security in this program. 
+**WARNING:** There's not much security in this program. 
 
 **DO NOT RUN THIS PROGRAM UNLESS YOUR PC IS PROTECTED BY A FIREWALL**
 
