@@ -294,13 +294,6 @@ class PyRexecSession(paramiko.ServerInterface):
             return paramiko.OPEN_SUCCEEDED
         return paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
     
-    def check_channel_pty_request(
-            self, channel, term, width, height,
-            pixelwidth, pixelheight, modes):
-        self.logger.debug('check_channel_pty_request: %r, %rx%r, %rx%r' %
-                          (term, width, height, pixelwidth, pixelheight))
-        return True
-    
     def check_channel_shell_request(self, channel):
         self.logger.debug('check_channel_shell_request')
         self.open(channel)
@@ -316,8 +309,9 @@ class PyRexecSession(paramiko.ServerInterface):
         self.logger.info('open: %r' % chan)
         self._chan = chan
         self._chan.settimeout(0.05)
-        self._proc = Popen(self.cmdline, stdin=PIPE, stdout=PIPE, stderr=STDOUT,
-                           cwd=self.homedir, creationflags=CREATE_NO_WINDOW)
+        self._proc = Popen(
+            self.cmdline, stdin=PIPE, stdout=PIPE, stderr=STDOUT,
+            cwd=self.homedir, creationflags=CREATE_NO_WINDOW)
         self._tasks = (
             self.ChanForwarder(self, self._chan, self._proc.stdin),
             self.PipeForwarder(self, self._proc.stdout, self._chan),
@@ -349,9 +343,6 @@ class PyRexecSession(paramiko.ServerInterface):
                 try:
                     data = self.chan.recv(self.size)
                     if not data: break
-                    # xxx do proper echoback
-                    data = data.replace('\r', '\r\n')
-                    self.chan.send(data)
                     self.pipe.write(data)
                 except socket.timeout:
                     continue
@@ -487,8 +478,7 @@ def main(argv):
         elif k == '-L': addr = v
         elif k == '-p': port = int(v)
         elif k == '-u': username = v
-        elif k == '-a':
-            pubkeys.extend(get_authorized_keys(v))
+        elif k == '-a': pubkeys.extend(get_authorized_keys(v))
         elif k == '-h': homedir = v
         elif k == '-c': cmdline = v
     hostkeys = []
