@@ -322,8 +322,7 @@ class PyRexecSession(paramiko.ServerInterface):
     
     def close(self):
         self.logger.info('close: %r' % self._chan)
-        self._proc.stdin.close()
-        self._proc.stdout.close()
+        self._proc.terminate()
         status = self._proc.wait()
         self.logger.info('exit status: %r' % status)
         self._chan.send_exit_status(status)
@@ -349,6 +348,7 @@ class PyRexecSession(paramiko.ServerInterface):
                 except (IOError, socket.error):
                     break
             self.session.logger.info('chan end')
+            self.pipe.close()
             return
         
     class PipeForwarder(Thread):
@@ -370,6 +370,7 @@ class PyRexecSession(paramiko.ServerInterface):
                 except (IOError, socket.error):
                     break
             self.session.logger.info('pipe end')
+            self.pipe.close()
             return
 
 # get_host_key
@@ -443,11 +444,13 @@ def run_server(hostkeys, username, pubkeys, homedir, cmdline,
         name = 'Session-%s-%s' % peer
         session = PyRexecSession(peer, name, username, pubkeys, homedir, cmdline)
         t.start_server(server=session)
-        t.accept(10)
-        if session.is_open():
+        if t.accept(10):
+            assert session.is_open()
             sessions.append(session)
             app.show_balloon(u'Connected', session.get_peer())
             app.set_busy(True)
+        else:
+            t.close()
     while sessions:
         session = sessions.pop()
         session.close()
