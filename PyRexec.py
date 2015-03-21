@@ -299,12 +299,6 @@ class PyRexecSession(paramiko.ServerInterface):
         self.open(channel)
         return True
 
-    def is_open(self):
-        if self._tasks is None: return False
-        for task in self._tasks:
-            if not task.isAlive(): return False
-        return True
-    
     def open(self, chan):
         self.logger.info('open: %r' % chan)
         self._chan = chan
@@ -329,6 +323,12 @@ class PyRexecSession(paramiko.ServerInterface):
         self._chan.close()
         return
 
+    def is_closed(self):
+        if self._tasks is None: return False
+        for task in self._tasks:
+            if not task.isAlive(): return True
+        return False
+    
     class ChanForwarder(Thread):
         def __init__(self, session, chan, pipe, size=64):
             Thread.__init__(self)
@@ -425,12 +425,12 @@ def run_server(hostkeys, username, pubkeys, homedir, cmdline,
     sessions = []
     while app.idle():
         for session in sessions[:]:
-            if session.is_open(): continue
-            session.close()
-            sessions.remove(session)
-            app.show_balloon(u'Disconnected', session.get_peer())
-            if not sessions:
-                app.set_busy(False)
+            if session.is_closed():
+                session.close()
+                sessions.remove(session)
+                app.show_balloon(u'Disconnected', session.get_peer())
+                if not sessions:
+                    app.set_busy(False)
         try:
             (conn, peer) = sock.accept()
         except socket.timeout:
@@ -443,13 +443,16 @@ def run_server(hostkeys, username, pubkeys, homedir, cmdline,
             t.add_server_key(k)
         name = 'Session-%s-%s' % peer
         session = PyRexecSession(peer, name, username, pubkeys, homedir, cmdline)
-        t.start_server(server=session)
-        if t.accept(10):
-            assert session.is_open()
-            sessions.append(session)
-            app.show_balloon(u'Connected', session.get_peer())
-            app.set_busy(True)
-        else:
+        try:
+            t.start_server(server=session)
+            if t.accept(10):
+                logging.info('Accepted')
+                sessions.append(session)
+                app.show_balloon(u'Connected', session.get_peer())
+                app.set_busy(True)
+            else:
+                t.close()
+        except EOFError:
             t.close()
     while sessions:
         session = sessions.pop()
