@@ -420,7 +420,13 @@ def run_server(hostkeys, username, pubkeys, homedir, cmdline,
     sock.listen(5)
     sock.settimeout(0.05)
     app = PyRexecTrayApp()
-    app.set_text(u'Listening: %s:%r...' % (addr, port))
+    def update_text(n):
+        s = u'Listening: %s:%r...' % (addr, port)
+        if n:
+            s += u'\n(Clients: %d)' % n
+        app.set_text(s)
+        return
+    update_text(0)
     app.set_busy(False)
     sessions = []
     while app.idle():
@@ -428,6 +434,7 @@ def run_server(hostkeys, username, pubkeys, homedir, cmdline,
             if session.is_closed():
                 session.close()
                 sessions.remove(session)
+                update_text(len(sessions))
                 app.show_balloon(u'Disconnected', session.get_peer())
                 if not sessions:
                     app.set_busy(False)
@@ -448,6 +455,7 @@ def run_server(hostkeys, username, pubkeys, homedir, cmdline,
             if t.accept(10):
                 logging.info('Accepted')
                 sessions.append(session)
+                update_text(len(sessions))
                 app.show_balloon(u'Connected', session.get_peer())
                 app.set_busy(True)
             else:
