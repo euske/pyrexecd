@@ -268,6 +268,7 @@ class PyRexecSession(paramiko.ServerInterface):
         self._chan = None
         self._proc = None
         self._tasks = None
+        self._events = []
         return
 
     def __repr__(self):
@@ -299,12 +300,19 @@ class PyRexecSession(paramiko.ServerInterface):
         self.open(channel)
         return True
 
-    def open(self, chan):
-        self.logger.info('open: %r' % chan)
+    def check_channel_exec_request(self, channel, command):
+        self.logger.debug('check_channel_exec_request: %r' % command)
+        self.open(channel, self.cmdline+' /C '+command)
+        return True
+
+    def open(self, chan, cmdline=None):
+        self.logger.info('open: %r, cmdline=%r' % (chan, cmdline))
         self._chan = chan
         self._chan.settimeout(0.05)
+        if cmdline is None:
+            cmdline = self.cmdline
         self._proc = Popen(
-            self.cmdline, stdin=PIPE, stdout=PIPE, stderr=STDOUT,
+            cmdline, stdin=PIPE, stdout=PIPE, stderr=STDOUT,
             cwd=self.homedir, creationflags=CREATE_NO_WINDOW)
         self._tasks = (
             self.ChanForwarder(self, self._chan, self._proc.stdin),
@@ -312,6 +320,7 @@ class PyRexecSession(paramiko.ServerInterface):
         )
         for task in self._tasks:
             task.start()
+        self._events.append('open')
         return
     
     def close(self):
@@ -321,13 +330,18 @@ class PyRexecSession(paramiko.ServerInterface):
         self.logger.info('exit status: %r' % status)
         self._chan.send_exit_status(status)
         self._chan.close()
+        self._tasks = None
+        self._events.append('close')
         return
-
-    def is_closed(self):
-        if self._tasks is None: return False
-        for task in self._tasks:
-            if not task.isAlive(): return True
-        return False
+    
+    def get_event(self):
+        if self._tasks is not None:
+            for task in self._tasks:
+                if not task.isAlive():
+                    self.close()
+                    break
+        if not self._events: return None
+        return self._events.pop(0)
     
     class ChanForwarder(Thread):
         def __init__(self, session, chan, pipe, size=64):
@@ -431,8 +445,12 @@ def run_server(hostkeys, username, pubkeys, homedir, cmdline,
     sessions = []
     while app.idle():
         for session in sessions[:]:
-            if session.is_closed():
-                session.close()
+            ev = session.get_event()
+            if ev == 'open':
+                update_text(len(sessions))
+                app.show_balloon(u'Connected', session.get_peer())
+                app.set_busy(True)
+            elif ev == 'close':
                 sessions.remove(session)
                 update_text(len(sessions))
                 app.show_balloon(u'Disconnected', session.get_peer())
@@ -455,9 +473,6 @@ def run_server(hostkeys, username, pubkeys, homedir, cmdline,
             if t.accept(10):
                 logging.info('Accepted')
                 sessions.append(session)
-                update_text(len(sessions))
-                app.show_balloon(u'Connected', session.get_peer())
-                app.set_busy(True)
             else:
                 t.close()
         except EOFError:
