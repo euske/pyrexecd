@@ -356,6 +356,8 @@ class PyRexecSession(paramiko.ServerInterface):
                 try:
                     data = self.chan.recv(self.size)
                     if not data: break
+                    # derpy newline conversion.
+                    data = data.replace('\r\n','\n').replace('\r','\n')
                     self.pipe.write(data)
                 except socket.timeout:
                     continue
