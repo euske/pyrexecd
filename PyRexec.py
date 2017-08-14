@@ -264,6 +264,7 @@ class PyRexecSession(paramiko.ServerInterface):
         self.homedir = homedir
         self.cmdline = cmdline
         self._chan = None
+        self._command = None
         self._proc = None
         self._tasks = None
         self._events = []
@@ -295,21 +296,21 @@ class PyRexecSession(paramiko.ServerInterface):
     
     def check_channel_shell_request(self, channel):
         self.logger.debug('check_channel_shell_request')
-        self.open(channel)
         return True
 
     def check_channel_exec_request(self, channel, command):
         self.logger.debug('check_channel_exec_request: %r' % command)
         try:
-            command = command.decode('utf-8')
+            self._command = command.decode('utf-8')
         except UnicodeError:
             return False
-        self.open(channel, self.cmdline+['/C', command])
         return True
 
-    def open(self, chan, cmdline=None):
-        if cmdline is None:
+    def open(self, chan):
+        if self._command is None:
             cmdline = self.cmdline
+        else:
+            cmdline = self.cmdline+['/C', self._command]
         self._chan = chan
         self._chan.settimeout(0.05)
         self._proc = Popen(
@@ -360,8 +361,8 @@ class PyRexecSession(paramiko.ServerInterface):
                     data = self.chan.recv(self.size)
                     if not data: break
                     # derpy newline conversion.
-                    data = data.replace(b'\r\n',b'\n').replace(b'\r',b'\n')
                     self.pipe.write(data)
+                    self.pipe.flush()
                 except socket.timeout:
                     continue
                 except (IOError, socket.error) as e:
@@ -479,8 +480,10 @@ def run_server(hostkeys, username, pubkeys, homedir, cmdline,
         session = PyRexecSession(peer, name, username, pubkeys, homedir, cmdline)
         try:
             t.start_server(server=session)
-            if t.accept(10):
+            chan = t.accept(10)
+            if chan is not None:
                 logging.info('Opening: %r' % session)
+                session.open(chan)
                 sessions.append(session)
             else:
                 logging.error('Timeout')
