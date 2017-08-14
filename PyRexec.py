@@ -1,10 +1,8 @@
 #!/usr/bin/env python
 
 # Prerequisites:
-#   Python 2.7 (https://www.python.org/downloads/)
+#   Python 3 (https://www.python.org/downloads/)
 #   Python for Windows (http://sourceforge.net/projects/pywin32/)
-#   PyCrypto (http://www.voidspace.org.uk/python/modules.shtml#pycrypto)
-#   Python-ecdsa (https://pypi.python.org/pypi/ecdsa)
 #   Paramiko (https://github.com/paramiko/paramiko)
 
 # Usage:
@@ -302,18 +300,23 @@ class PyRexecSession(paramiko.ServerInterface):
 
     def check_channel_exec_request(self, channel, command):
         self.logger.debug('check_channel_exec_request: %r' % command)
-        self.open(channel, self.cmdline+' /C '+command)
+        try:
+            command = command.decode('utf-8')
+        except UnicodeError:
+            return False
+        self.open(channel, self.cmdline+['/C', command])
         return True
 
     def open(self, chan, cmdline=None):
-        self.logger.info('open: %r, cmdline=%r' % (chan, cmdline))
-        self._chan = chan
-        self._chan.settimeout(0.05)
         if cmdline is None:
             cmdline = self.cmdline
+        self._chan = chan
+        self._chan.settimeout(0.05)
         self._proc = Popen(
             cmdline, stdin=PIPE, stdout=PIPE, stderr=STDOUT,
             cwd=self.homedir, creationflags=CREATE_NO_WINDOW)
+        self.logger.info('open: %r, cmdline=%r, proc=%r' %
+                         (chan, cmdline, self._proc))
         self._tasks = (
             self.ChanForwarder(self, self._chan, self._proc.stdin),
             self.PipeForwarder(self, self._proc.stdout, self._chan),
@@ -357,11 +360,12 @@ class PyRexecSession(paramiko.ServerInterface):
                     data = self.chan.recv(self.size)
                     if not data: break
                     # derpy newline conversion.
-                    data = data.replace('\r\n','\n').replace('\r','\n')
+                    data = data.replace(b'\r\n',b'\n').replace(b'\r',b'\n')
                     self.pipe.write(data)
                 except socket.timeout:
                     continue
-                except (IOError, socket.error):
+                except (IOError, socket.error) as e:
+                    self.session.logger.error('chan error: %r' % e)
                     break
             self.session.logger.info('chan end')
             self.pipe.close()
@@ -383,7 +387,8 @@ class PyRexecSession(paramiko.ServerInterface):
                     self.chan.send(data)
                 except socket.timeout:
                     continue
-                except (IOError, socket.error):
+                except (IOError, socket.error) as e:
+                    self.session.logger.error('pipe error: %r' % e)
                     break
             self.session.logger.info('pipe end')
             self.pipe.close()
@@ -404,20 +409,19 @@ def get_host_key(path):
 # get_authorized_keys
 def get_authorized_keys(path):
     keys = []
-    fp = file(path)
-    for line in fp:
-        (t,_,data) = line.partition(' ')
-        if t == 'ssh-rsa':
-            f = paramiko.RSAKey
-        elif t == 'ssh-dss':
-            f = paramiko.DSSKey
-        elif t.startswith('ecdsa-'):
-            f = paramiko.ECDSAKey
-        else:
-            continue
-        data = decodebytes(data)
-        keys.append(f(data=data))
-    fp.close()
+    with open(path) as fp:
+        for line in fp:
+            (t,_,data) = line.partition(' ')
+            if t == 'ssh-rsa':
+                f = paramiko.RSAKey
+            elif t == 'ssh-dss':
+                f = paramiko.DSSKey
+            elif t.startswith('ecdsa-'):
+                f = paramiko.ECDSAKey
+            else:
+                continue
+            data = decodebytes(data.encode('utf-8'))
+            keys.append(f(data=data))
     return keys
 
 # run_server
@@ -425,6 +429,8 @@ def run_server(hostkeys, username, pubkeys, homedir, cmdline,
                addr='127.0.0.1', port=2222):
     logging.info('Hostkeys: %d' % len(hostkeys))
     logging.info('Username: %r (pubkeys:%d)' % (username, len(pubkeys)))
+    logging.info('Homedir: %r' % homedir)
+    logging.info('Cmdline: %r' % cmdline)
     logging.info('Listening: %s:%s...' % (addr, port))
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
@@ -466,6 +472,7 @@ def run_server(hostkeys, username, pubkeys, homedir, cmdline,
         logging.info('Connected: addr=%r, port=%r' % peer)
         t = paramiko.Transport(conn)
         t.load_server_moduli()
+        #t.set_subsystem_handler('sftp', paramiko.SFTPServer)
         for k in hostkeys:
             t.add_server_key(k)
         name = 'Session-%s-%s' % peer
@@ -473,14 +480,17 @@ def run_server(hostkeys, username, pubkeys, homedir, cmdline,
         try:
             t.start_server(server=session)
             if t.accept(10):
-                logging.info('Accepted')
+                logging.info('Opening: %r' % session)
                 sessions.append(session)
             else:
+                logging.error('Timeout')
                 t.close()
-        except EOFError:
+        except EOFError as e:
+            logging.error('Error: %r' % e)
             t.close()
     while sessions:
         session = sessions.pop()
+        logging.info('Closing: %r' % session)
         session.close()
     return
 
@@ -502,7 +512,7 @@ def main(argv):
     username = os.environ.get('USERNAME', 'unknown')
     homedir = os.environ.get('USERPROFILE', '.')
     pubkeys = get_authorized_keys('authorized_keys')
-    cmdline = 'cmd /Q'
+    cmdline = ['cmd','/Q']
     for (k, v) in opts:
         if k == '-d': loglevel = logging.DEBUG
         elif k == '-l': logfile = v
@@ -516,7 +526,7 @@ def main(argv):
     for path in args:
         hostkeys.append(get_host_key(path))
     if not hostkeys:
-        print 'no hostkey is found!'
+        print('no hostkey is found!')
         return 111
     logging.basicConfig(level=loglevel, filename=logfile, filemode='a')
     PyRexecTrayApp.initialize(basedir=os.path.dirname(argv[0]))
