@@ -15,6 +15,11 @@ import time
 import socket
 import logging
 import paramiko
+import win32con
+import win32gui
+import win32gui_struct
+import win32clipboard
+from io import StringIO
 from subprocess import Popen, PIPE, STDOUT, DEVNULL
 from threading import Thread
 from paramiko.py3compat import decodebytes
@@ -32,8 +37,6 @@ class SysTrayApp(object):
 
     @classmethod
     def initialize(klass):
-        import win32con
-        import win32gui
         WM_RESTART = win32gui.RegisterWindowMessage('TaskbarCreated')
         klass.WM_NOTIFY = win32con.WM_USER+1
         klass.WNDCLASS = win32gui.WNDCLASS()
@@ -56,7 +59,6 @@ class SysTrayApp(object):
 
     @classmethod
     def _create(klass, hwnd, instance):
-        import win32gui
         klass._instance[hwnd] = instance
         win32gui.Shell_NotifyIcon(
             win32gui.NIM_ADD,
@@ -79,8 +81,6 @@ class SysTrayApp(object):
         
     @classmethod
     def _notify(klass, hwnd, msg, wparam, lparam):
-        import win32con
-        import win32gui
         self = klass._instance[hwnd]
         if lparam == win32con.WM_LBUTTONDBLCLK:
             menu = self.get_popup()
@@ -100,13 +100,11 @@ class SysTrayApp(object):
 
     @classmethod
     def _close(klass, hwnd, msg, wparam, lparam):
-        import win32gui
         win32gui.DestroyWindow(hwnd)
         return
 
     @classmethod
     def _destroy(klass, hwnd, msg, wparam, lparam):
-        import win32gui
         del klass._instance[hwnd]
         win32gui.Shell_NotifyIcon(win32gui.NIM_DELETE, (hwnd, 0))
         win32gui.PostQuitMessage(0)
@@ -114,80 +112,67 @@ class SysTrayApp(object):
 
     @classmethod
     def _command(klass, hwnd, msg, wparam, lparam):
-        import win32gui
         wid = win32gui.LOWORD(wparam)
         self = klass._instance[hwnd]
         self.choose(wid)
         return
 
     def __init__(self, name):
-        import win32con
-        import win32gui
         self.logger = logging.getLogger(name)
-        self._hwnd = win32gui.CreateWindow(
+        self.hwnd = win32gui.CreateWindow(
             self.CLASS_ATOM, name,
             (win32con.WS_OVERLAPPED | win32con.WS_SYSMENU),
             0, 0, win32con.CW_USEDEFAULT, win32con.CW_USEDEFAULT, 0, 0,
             self.WNDCLASS.hInstance, None)
-        self._create(self._hwnd, self)
+        self._create(self.hwnd, self)
         self.logger.info('create: name=%r' % name)
         return
 
     def open(self):
-        import win32gui
         self.logger.info('open')
-        win32gui.UpdateWindow(self._hwnd)
+        win32gui.UpdateWindow(self.hwnd)
         return
 
     def run(self):
-        import win32gui
         self.logger.info('run')
         win32gui.PumpMessages()
         return
 
     def idle(self):
-        import win32gui
         return not win32gui.PumpWaitingMessages()
 
     def close(self):
-        import win32con
-        import win32gui
         self.logger.info('close')
-        win32gui.PostMessage(self._hwnd, win32con.WM_CLOSE, 0, 0)
+        win32gui.PostMessage(self.hwnd, win32con.WM_CLOSE, 0, 0)
         return
 
     def set_icon(self, icon):
-        import win32gui
         self.logger.info('set_icon: %r' % icon)
         win32gui.Shell_NotifyIcon(
             win32gui.NIM_MODIFY,
-            (self._hwnd, 0, win32gui.NIF_ICON,
+            (self.hwnd, 0, win32gui.NIF_ICON,
              0, icon))
         return
 
     def set_text(self, text):
-        import win32gui
         self.logger.info('set_text: %r' % text)
         win32gui.Shell_NotifyIcon(
             win32gui.NIM_MODIFY,
-            (self._hwnd, 0, win32gui.NIF_TIP,
+            (self.hwnd, 0, win32gui.NIF_TIP,
              0, 0, text))
         return
         
     def show_balloon(self, title, text, timeout=1):
-        import win32gui
         self.logger.info('show_balloon: %r, %r' % (title, text))
         win32gui.Shell_NotifyIcon(
             win32gui.NIM_MODIFY,
-            (self._hwnd, 0, win32gui.NIF_INFO,
+            (self.hwnd, 0, win32gui.NIF_INFO,
              0, 0, '', text, timeout, title, win32gui.NIIF_INFO))
         return
 
     IDI_QUIT = 100
     
     def get_popup(self):
-        import win32gui
-        import win32gui_struct
         menu = win32gui.CreatePopupMenu()
         (item, _) = win32gui_struct.PackMENUITEMINFO(text=u'Quit', wID=self.IDI_QUIT)
         win32gui.InsertMenuItem(menu, 0, 1, item)
@@ -209,8 +194,6 @@ class PyRexecTrayApp(SysTrayApp):
 
     @classmethod
     def initialize(klass, basedir='.'):
-        import win32con
-        import win32gui
         SysTrayApp.initialize()
         klass.ICON_IDLE = win32gui.LoadImage(
             0, os.path.join(basedir, 'PyRexec.ico'),
@@ -236,8 +219,6 @@ class PyRexecTrayApp(SysTrayApp):
         return
 
     def get_popup(self):
-        import win32gui
-        import win32gui_struct
         menu = win32gui.CreatePopupMenu()
         (item, _) = win32gui_struct.PackMENUITEMINFO(text=u'Quit', wID=self.IDI_QUIT)
         win32gui.InsertMenuItem(menu, 0, 1, item)
@@ -298,8 +279,9 @@ class PyRexecServer(paramiko.ServerInterface):
 ##
 class PyRexecSession:
 
-    def __init__(self, name, chan, homedir, cmdexe, server, timeout=10):
+    def __init__(self, app, name, chan, homedir, cmdexe, server, timeout=10):
         self.logger = logging.getLogger(name)
+        self.app = app
         self.name = name
         self.homedir = homedir
         self.cmdexe = cmdexe
@@ -349,28 +331,39 @@ class PyRexecSession:
         self._chan.settimeout(0.05)
         self._add_event('open')
         self._tasks = []
-        self.start_tasks(self._chan)
+        self._proc = None
+        self.start_tasks(self._chan, self.server.command)
         return
     
     def close(self, status=0):
         self.logger.info('close: %r, status=%r' % (self._chan, status))
-        status = self.finish_tasks()
         self._tasks = []
+        if self._proc is None:
+            status = 0
+        else:
+            self._proc.terminate()
+            status = self._proc.wait()
         self._chan.send_exit_status(status)
         self._chan.close()
         self._add_event('closed')
         return
 
-    def start_tasks(self, chan):
-        command = self.server.command
+    def start_tasks(self, chan, command):
         self.logger.info('start: command: %r' % command)
-        self._proc = None
         try:
             if command is not None and command.startswith('@'):
                 args = self.cmdexe+['/C', command[1:]]
                 Popen(
                     args, stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL,
                     cwd=self.homedir)
+            elif command == 'clipget':
+                win32clipboard.OpenClipboard(self.app.hwnd)
+                text = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
+                win32clipboard.CloseClipboard()
+                self.logger.debug('text=%r' % text)
+                chan.send(text.encode('utf-8'))
+            elif command == 'clipset':
+                self._add_task(self.ClipSetter(self, chan))
             else:
                 if command is None:
                     args = self.cmdexe
@@ -384,13 +377,6 @@ class PyRexecSession:
         except OSError as e:
             self.logger.error('cannot start: %r' % e)
         return
-        
-    def finish_tasks(self):
-        if self._proc is None:
-            return 0
-        else:
-            self._proc.terminate()
-            return self._proc.wait()
 
     class ChanForwarder(Thread):
         def __init__(self, session, chan, pipe, size=64):
@@ -405,7 +391,6 @@ class PyRexecSession:
                 try:
                     data = self.chan.recv(self.size)
                     if not data: break
-                    # derpy newline conversion.
                     self.pipe.write(data)
                     self.pipe.flush()
                 except socket.timeout:
@@ -413,7 +398,7 @@ class PyRexecSession:
                 except (IOError, socket.error) as e:
                     self.session.logger.error('chan error: %r' % e)
                     break
-            self.session.logger.info('chan end')
+            self.session.logger.debug('chan end')
             self.pipe.close()
             return
         
@@ -436,10 +421,39 @@ class PyRexecSession:
                 except (IOError, socket.error) as e:
                     self.session.logger.error('pipe error: %r' % e)
                     break
-            self.session.logger.info('pipe end')
+            self.session.logger.debug('pipe end')
             self.pipe.close()
             return
 
+    class ClipSetter(Thread):
+        def __init__(self, session, chan):
+            Thread.__init__(self)
+            self.session = session
+            self.chan = chan
+            self._data = b''
+            return
+        def run(self):
+            while 1:
+                try:
+                    data = self.chan.recv(256)
+                    if not data: break
+                    self._data += data
+                except socket.timeout:
+                    continue
+                except (IOError, socket.error) as e:
+                    self.session.logger.error('chan error: %r' % e)
+                    break
+            self.session.logger.debug('clip data=%r' % self._data)
+            try:
+                text = self._data.decode('utf-8')
+                win32clipboard.OpenClipboard(self.session.app.hwnd)
+                win32clipboard.EmptyClipboard()
+                win32clipboard.SetClipboardText(text)
+                win32clipboard.CloseClipboard()
+            except UnicodeError:
+                pass
+            return
+        
 # get_host_key
 def get_host_key(path):
     if path.endswith('rsa_key'):
@@ -531,7 +545,7 @@ def run_server(hostkeys, username, pubkeys, homedir, cmdexe,
             t.start_server(server=server)
             chan = t.accept(10)
             if chan is not None:
-                session = PyRexecSession(name, chan, homedir, cmdexe, server)
+                session = PyRexecSession(app, name, chan, homedir, cmdexe, server)
                 sessions.append(session)
             else:
                 logging.error('Timeout')
