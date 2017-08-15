@@ -249,22 +249,57 @@ class PyRexecTrayApp(SysTrayApp):
         return
 
 
-##  PyRexecSession
+##  PyRexecServer
 ##
-class PyRexecSession(paramiko.ServerInterface):
-
-    class Exit(Exception): pass
-
-    def __init__(self, peer, name, username, pubkeys, homedir, cmdline):
-        self.peer = peer
-        self.name = name
-        self.logger = logging.getLogger(self.name)
+class PyRexecServer(paramiko.ServerInterface):
+    
+    def __init__(self, username, pubkeys):
         self.username = username
         self.pubkeys = pubkeys
+        self.command = None
+        return
+
+    def get_allowed_auths(self, username):
+        if username == self.username:
+            return 'publickey'
+        return ''
+    
+    def check_auth_publickey(self, username, key):
+        logging.debug('check_auth_publickey: %r' % username)
+        if username == self.username:
+            for k in self.pubkeys:
+                if k == key: return paramiko.AUTH_SUCCESSFUL
+        return paramiko.AUTH_FAILED
+    
+    def check_channel_request(self, kind, chanid):
+        logging.debug('check_channel_request: %r' % kind)
+        if kind == 'session':
+            return paramiko.OPEN_SUCCEEDED
+        return paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
+    
+    def check_channel_shell_request(self, channel):
+        logging.debug('check_channel_shell_request')
+        return True
+
+    def check_channel_exec_request(self, channel, command):
+        logging.debug('check_channel_exec_request: %r' % command)
+        try:
+            self.command = command.decode('utf-8')
+        except UnicodeError:
+            return False
+        return True
+
+
+##  PyRexecSession
+##
+class PyRexecSession:
+
+    def __init__(self, name, homedir, args):
+        self.logger = logging.getLogger(name)
+        self.name = name
         self.homedir = homedir
-        self.cmdline = cmdline
+        self.args = args
         self._chan = None
-        self._command = None
         self._proc = None
         self._tasks = None
         self._events = []
@@ -273,51 +308,17 @@ class PyRexecSession(paramiko.ServerInterface):
     def __repr__(self):
         return ('<%s: %s>' % (self.__class__.__name__, self.name))
 
-    def get_peer(self):
-        return '%s:%s' % self.peer
-
-    def get_allowed_auths(self, username):
-        if username == self.username:
-            return 'publickey'
-        return ''
-    
-    def check_auth_publickey(self, username, key):
-        self.logger.debug('check_auth_publickey: %r' % username)
-        if username == self.username:
-            for k in self.pubkeys:
-                if k == key: return paramiko.AUTH_SUCCESSFUL
-        return paramiko.AUTH_FAILED
-    
-    def check_channel_request(self, kind, chanid):
-        self.logger.debug('check_channel_request: %r' % kind)
-        if kind == 'session':
-            return paramiko.OPEN_SUCCEEDED
-        return paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
-    
-    def check_channel_shell_request(self, channel):
-        self.logger.debug('check_channel_shell_request')
-        return True
-
-    def check_channel_exec_request(self, channel, command):
-        self.logger.debug('check_channel_exec_request: %r' % command)
-        try:
-            self._command = command.decode('utf-8')
-        except UnicodeError:
-            return False
-        return True
+    def get_name(self):
+        return self.name
 
     def open(self, chan):
-        if self._command is None:
-            cmdline = self.cmdline
-        else:
-            cmdline = self.cmdline+['/C', self._command]
         self._chan = chan
         self._chan.settimeout(0.05)
         self._proc = Popen(
-            cmdline, stdin=PIPE, stdout=PIPE, stderr=STDOUT,
+            self.args, stdin=PIPE, stdout=PIPE, stderr=STDOUT,
             cwd=self.homedir, creationflags=CREATE_NO_WINDOW)
-        self.logger.info('open: %r, cmdline=%r, proc=%r' %
-                         (chan, cmdline, self._proc))
+        self.logger.info('open: %r, args=%r, proc=%r' %
+                         (chan, self.args, self._proc))
         self._tasks = (
             self.ChanForwarder(self, self._chan, self._proc.stdin),
             self.PipeForwarder(self, self._proc.stdout, self._chan),
@@ -425,13 +426,20 @@ def get_authorized_keys(path):
             keys.append(f(data=data))
     return keys
 
+# create_session
+def create_session(name, homedir, cmdexe, command):
+    if command is None:
+        return PyRexecSession(name, homedir, cmdexe)
+    else:
+        return PyRexecSession(name, homedir, cmdexe+['/C', command])
+
 # run_server
-def run_server(hostkeys, username, pubkeys, homedir, cmdline,
+def run_server(hostkeys, username, pubkeys, homedir, cmdexe,
                addr='127.0.0.1', port=2222):
     logging.info('Hostkeys: %d' % len(hostkeys))
     logging.info('Username: %r (pubkeys:%d)' % (username, len(pubkeys)))
     logging.info('Homedir: %r' % homedir)
-    logging.info('Cmdline: %r' % cmdline)
+    logging.info('Cmd.exe: %r' % cmdexe)
     logging.info('Listening: %s:%s...' % (addr, port))
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
@@ -457,12 +465,12 @@ def run_server(hostkeys, username, pubkeys, homedir, cmdline,
             ev = session.get_event()
             if ev == 'open':
                 update_text(len(sessions))
-                app.show_balloon(u'Connected', session.get_peer())
+                app.show_balloon(u'Connected', session.get_name())
                 app.set_busy(True)
             elif ev == 'close':
                 sessions.remove(session)
                 update_text(len(sessions))
-                app.show_balloon(u'Disconnected', session.get_peer())
+                app.show_balloon(u'Disconnected', session.get_name())
                 if not sessions:
                     app.set_busy(False)
         try:
@@ -477,12 +485,12 @@ def run_server(hostkeys, username, pubkeys, homedir, cmdline,
         for k in hostkeys:
             t.add_server_key(k)
         name = 'Session-%s-%s' % peer
-        session = PyRexecSession(peer, name, username, pubkeys, homedir, cmdline)
+        server = PyRexecServer(username, pubkeys)
         try:
-            t.start_server(server=session)
+            t.start_server(server=server)
             chan = t.accept(10)
             if chan is not None:
-                logging.info('Opening: %r' % session)
+                session = create_session(name, homedir, cmdexe, server.command)
                 session.open(chan)
                 sessions.append(session)
             else:
@@ -493,7 +501,6 @@ def run_server(hostkeys, username, pubkeys, homedir, cmdline,
             t.close()
     while sessions:
         session = sessions.pop()
-        logging.info('Closing: %r' % session)
         session.close()
     return
 
@@ -502,7 +509,7 @@ def main(argv):
     import getopt
     def usage():
         print ('usage: %s [-d] [-l logfile] [-L addr] [-p port]'
-               ' [-u username] [-a authkeys] [-h homedir] [-c cmdline]' % argv[0])
+               ' [-u username] [-a authkeys] [-h homedir] [-c cmdexe]' % argv[0])
         return 100
     try:
         (opts, args) = getopt.getopt(argv[1:], 'dl:L:p:u:a:h:c:')
@@ -514,26 +521,31 @@ def main(argv):
     addr = '0.0.0.0'
     username = os.environ.get('USERNAME', 'unknown')
     homedir = os.environ.get('USERPROFILE', '.')
-    pubkeys = get_authorized_keys('authorized_keys')
-    cmdline = ['cmd','/Q']
+    authkeys = []
+    cmdexe = ['cmd','/Q']
     for (k, v) in opts:
         if k == '-d': loglevel = logging.DEBUG
         elif k == '-l': logfile = v
         elif k == '-L': addr = v
         elif k == '-p': port = int(v)
         elif k == '-u': username = v
-        elif k == '-a': pubkeys.extend(get_authorized_keys(v))
+        elif k == '-a': authkeys.append(v)
         elif k == '-h': homedir = v
-        elif k == '-c': cmdline = v
+        elif k == '-c': cmdexe = v
+    pubkeys = []
+    for path in (authkeys or ['authorized_keys']):
+        if os.path.isfile(path):
+            pubkeys.extend(get_authorized_keys(path))
     hostkeys = []
-    for path in args:
-        hostkeys.append(get_host_key(path))
+    for path in (args or ['ssh_host_rsa_key', 'ssh_host_dsa_key']):
+        if os.path.isfile(path):
+            hostkeys.append(get_host_key(path))
     if not hostkeys:
         print('no hostkey is found!')
         return 111
     logging.basicConfig(level=loglevel, filename=logfile, filemode='a')
     PyRexecTrayApp.initialize(basedir=os.path.dirname(argv[0]))
-    run_server(hostkeys, username, pubkeys, homedir, cmdline,
+    run_server(hostkeys, username, pubkeys, homedir, cmdexe,
                addr=addr, port=port)
     return
 if __name__ == '__main__': sys.exit(main(sys.argv))
