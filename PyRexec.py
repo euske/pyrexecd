@@ -11,10 +11,11 @@
 import sys
 import os
 import os.path
+import time
 import socket
 import logging
 import paramiko
-from subprocess import Popen, PIPE, STDOUT
+from subprocess import Popen, PIPE, STDOUT, DEVNULL
 from threading import Thread
 from paramiko.py3compat import decodebytes
 CREATE_NO_WINDOW = 0x08000000
@@ -257,6 +258,7 @@ class PyRexecServer(paramiko.ServerInterface):
         self.username = username
         self.pubkeys = pubkeys
         self.command = None
+        self.ready = False
         return
 
     def get_allowed_auths(self, username):
@@ -279,12 +281,14 @@ class PyRexecServer(paramiko.ServerInterface):
     
     def check_channel_shell_request(self, channel):
         logging.debug('check_channel_shell_request')
+        self.ready = True
         return True
 
     def check_channel_exec_request(self, channel, command):
         logging.debug('check_channel_exec_request: %r' % command)
         try:
             self.command = command.decode('utf-8')
+            self.ready = True
         except UnicodeError:
             return False
         return True
@@ -294,13 +298,14 @@ class PyRexecServer(paramiko.ServerInterface):
 ##
 class PyRexecSession:
 
-    def __init__(self, name, homedir, args):
+    def __init__(self, name, chan, homedir, cmdexe, server, timeout=10):
         self.logger = logging.getLogger(name)
         self.name = name
         self.homedir = homedir
-        self.args = args
-        self._chan = None
-        self._proc = None
+        self.cmdexe = cmdexe
+        self.server = server
+        self._timeout = time.time()+timeout
+        self._chan = chan
         self._tasks = None
         self._events = []
         return
@@ -308,46 +313,85 @@ class PyRexecSession:
     def __repr__(self):
         return ('<%s: %s>' % (self.__class__.__name__, self.name))
 
+    def _add_task(self, task):
+        self._tasks.append(task)
+        task.start()
+        return
+
+    def _add_event(self, ev):
+        self._events.append(ev)
+        return
+
     def get_name(self):
         return self.name
 
-    def open(self, chan):
-        self._chan = chan
-        self._chan.settimeout(0.05)
-        self._proc = Popen(
-            self.args, stdin=PIPE, stdout=PIPE, stderr=STDOUT,
-            cwd=self.homedir, creationflags=CREATE_NO_WINDOW)
-        self.logger.info('open: %r, args=%r, proc=%r' %
-                         (chan, self.args, self._proc))
-        self._tasks = (
-            self.ChanForwarder(self, self._chan, self._proc.stdin),
-            self.PipeForwarder(self, self._proc.stdout, self._chan),
-        )
-        for task in self._tasks:
-            task.start()
-        self._events.append('open')
-        return
-    
-    def close(self):
-        self.logger.info('close: %r' % self._chan)
-        self._proc.terminate()
-        status = self._proc.wait()
-        self.logger.info('exit status: %r' % status)
-        self._chan.send_exit_status(status)
-        self._chan.close()
-        self._tasks = None
-        self._events.append('close')
-        return
-    
     def get_event(self):
-        if self._tasks is not None:
-            for task in self._tasks:
-                if not task.isAlive():
-                    self.close()
-                    break
         if not self._events: return None
         return self._events.pop(0)
     
+    def idle(self):
+        if self._tasks is None:
+            if self.server.ready:
+                self.open()
+            elif self._timeout < time.time():
+                self._add_event('timeout')
+        elif self._tasks:
+            for task in self._tasks:
+                if not task.isAlive():
+                    self._add_event('closing')
+                    break
+        else:
+            self._add_event('closing')
+        return
+    
+    def open(self):
+        self.logger.info('open: %r' % self._chan)
+        self._chan.settimeout(0.05)
+        self._add_event('open')
+        self._tasks = []
+        self.start_tasks(self._chan)
+        return
+    
+    def close(self, status=0):
+        self.logger.info('close: %r, status=%r' % (self._chan, status))
+        status = self.finish_tasks()
+        self._tasks = []
+        self._chan.send_exit_status(status)
+        self._chan.close()
+        self._add_event('closed')
+        return
+
+    def start_tasks(self, chan):
+        command = self.server.command
+        self.logger.info('start: command: %r' % command)
+        self._proc = None
+        try:
+            if command is not None and command.startswith('@'):
+                args = self.cmdexe+['/C', command[1:]]
+                Popen(
+                    args, stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL,
+                    cwd=self.homedir)
+            else:
+                if command is None:
+                    args = self.cmdexe
+                else:
+                    args = self.cmdexe+['/C', command]
+                self._proc = Popen(
+                    args, stdin=PIPE, stdout=PIPE, stderr=STDOUT,
+                    cwd=self.homedir, creationflags=CREATE_NO_WINDOW)
+                self._add_task(self.ChanForwarder(self, chan, self._proc.stdin))
+                self._add_task(self.PipeForwarder(self, self._proc.stdout, chan))
+        except OSError as e:
+            self.logger.error('cannot start: %r' % e)
+        return
+        
+    def finish_tasks(self):
+        if self._proc is None:
+            return 0
+        else:
+            self._proc.terminate()
+            return self._proc.wait()
+
     class ChanForwarder(Thread):
         def __init__(self, session, chan, pipe, size=64):
             Thread.__init__(self)
@@ -426,13 +470,6 @@ def get_authorized_keys(path):
             keys.append(f(data=data))
     return keys
 
-# create_session
-def create_session(name, homedir, cmdexe, command):
-    if command is None:
-        return PyRexecSession(name, homedir, cmdexe)
-    else:
-        return PyRexecSession(name, homedir, cmdexe+['/C', command])
-
 # run_server
 def run_server(hostkeys, username, pubkeys, homedir, cmdexe,
                addr='127.0.0.1', port=2222):
@@ -462,17 +499,21 @@ def run_server(hostkeys, username, pubkeys, homedir, cmdexe,
     sessions = []
     while app.idle():
         for session in sessions[:]:
+            session.idle()
             ev = session.get_event()
             if ev == 'open':
                 update_text(len(sessions))
                 app.show_balloon(u'Connected', session.get_name())
                 app.set_busy(True)
-            elif ev == 'close':
+            elif ev == 'closing':
+                session.close()
                 sessions.remove(session)
                 update_text(len(sessions))
                 app.show_balloon(u'Disconnected', session.get_name())
                 if not sessions:
                     app.set_busy(False)
+            elif ev == 'timeout':
+                sessions.remove(session)
         try:
             (conn, peer) = sock.accept()
         except socket.timeout:
@@ -490,8 +531,7 @@ def run_server(hostkeys, username, pubkeys, homedir, cmdexe,
             t.start_server(server=server)
             chan = t.accept(10)
             if chan is not None:
-                session = create_session(name, homedir, cmdexe, server.command)
-                session.open(chan)
+                session = PyRexecSession(name, chan, homedir, cmdexe, server)
                 sessions.append(session)
             else:
                 logging.error('Timeout')
