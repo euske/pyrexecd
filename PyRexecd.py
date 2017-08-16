@@ -306,6 +306,7 @@ class PyRexecSession:
         self.homedir = homedir
         self.cmdexe = cmdexe
         self.server = server
+        self.bufsize = 512
         self._timeout = time.time()+timeout
         self._chan = chan
         self._tasks = None
@@ -399,17 +400,16 @@ class PyRexecSession:
         return
 
     class ChanForwarder(Thread):
-        def __init__(self, session, chan, pipe, size=64):
+        def __init__(self, session, chan, pipe):
             Thread.__init__(self)
             self.session = session
             self.chan = chan
             self.pipe = pipe
-            self.size = size
             return
         def run(self):
             while 1:
                 try:
-                    data = self.chan.recv(self.size)
+                    data = self.chan.recv(self.session.bufsize)
                     if not data: break
                     self.pipe.write(data)
                     self.pipe.flush()
@@ -423,17 +423,16 @@ class PyRexecSession:
             return
         
     class PipeForwarder(Thread):
-        def __init__(self, session, pipe, chan, size=1):
+        def __init__(self, session, pipe, chan):
             Thread.__init__(self)
             self.session = session
             self.pipe = pipe
             self.chan = chan
-            self.size = size
             return
         def run(self):
             while 1:
                 try:
-                    data = self.pipe.read(self.size)
+                    data = self.pipe.read(1)
                     if not data: break
                     self.chan.send(data)
                 except socket.timeout:
@@ -455,7 +454,7 @@ class PyRexecSession:
         def run(self):
             while 1:
                 try:
-                    data = self.chan.recv(256)
+                    data = self.chan.recv(self.session.bufsize)
                     if not data: break
                     self._data += data
                 except socket.timeout:

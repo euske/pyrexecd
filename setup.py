@@ -16,4 +16,4 @@ setup(name = 'PyRexecd',
       version = '0.1',
       description = 'PyRexecd',
       options = { 'build_exe': build_exe_options },
-      executables = [Executable('PyRexecd.py', base=base)])
+      executables = [Executable('PyRexecd.py', base=base, icon='icons/PyRexec.ico')])
