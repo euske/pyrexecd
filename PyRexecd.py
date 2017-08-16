@@ -6,24 +6,44 @@
 #   Paramiko (https://github.com/paramiko/paramiko)
 
 # Usage:
-#   python pyrexec.py ssh_host_rsa_key
+#   $ ssh-keygen -N '' -f ssh_host_rsa_key
+#   > python pyrexec.py
 
 import sys
-import os
 import os.path
 import time
 import socket
 import logging
 import paramiko
 import win32con
+import win32api
 import win32gui
 import win32gui_struct
 import win32clipboard
+from win32com.shell import shell, shellcon
 from io import StringIO
 from subprocess import Popen, PIPE, STDOUT, DEVNULL
 from threading import Thread
 from paramiko.py3compat import decodebytes
-CREATE_NO_WINDOW = 0x08000000
+
+
+def msgbox(text, caption='Error'):
+    win32gui.MessageBox(None, text, caption,
+                        (win32con.MB_OK | win32con.MB_ERROR))
+    return
+
+def getpath(csidl):
+    return shell.SHGetSpecialFolderPath(None, csidl, 0)
+
+frozen = getattr(sys, 'frozen', False)
+if frozen:
+    APPDATA = os.path.join(getpath(shellcon.CSIDL_APPDATA), 'PyRexecd')
+    DATADIR = os.path.dirname(sys.executable)
+    error = msgbox
+else:
+    APPDATA = '.'
+    DATADIR = os.path.dirname(__file__)
+    error = print
 
 
 ##  SysTrayApp
@@ -193,7 +213,7 @@ class SysTrayApp(object):
 class PyRexecTrayApp(SysTrayApp):
 
     @classmethod
-    def initialize(klass, basedir='.'):
+    def initialize(klass, basedir='icons'):
         SysTrayApp.initialize()
         klass.ICON_IDLE = win32gui.LoadImage(
             0, os.path.join(basedir, 'PyRexec.ico'),
@@ -371,7 +391,7 @@ class PyRexecSession:
                     args = self.cmdexe+['/C', command]
                 self._proc = Popen(
                     args, stdin=PIPE, stdout=PIPE, stderr=STDOUT,
-                    cwd=self.homedir, creationflags=CREATE_NO_WINDOW)
+                    cwd=self.homedir, creationflags=win32con.CREATE_NO_WINDOW)
                 self._add_task(self.ChanForwarder(self, chan, self._proc.stdin))
                 self._add_task(self.PipeForwarder(self, self._proc.stdout, chan))
         except OSError as e:
@@ -485,12 +505,8 @@ def get_authorized_keys(path):
     return keys
 
 # run_server
-def run_server(hostkeys, username, pubkeys, homedir, cmdexe,
-               addr='127.0.0.1', port=2222):
-    logging.info('Hostkeys: %d' % len(hostkeys))
-    logging.info('Username: %r (pubkeys:%d)' % (username, len(pubkeys)))
-    logging.info('Homedir: %r' % homedir)
-    logging.info('Cmd.exe: %r' % cmdexe)
+def run_server(app, hostkeys, username, pubkeys, homedir, cmdexe,
+               addr='127.0.0.1', port=2200):
     logging.info('Listening: %s:%s...' % (addr, port))
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
@@ -501,7 +517,6 @@ def run_server(hostkeys, username, pubkeys, homedir, cmdexe,
     sock.bind((addr, port))
     sock.listen(5)
     sock.settimeout(0.05)
-    app = PyRexecTrayApp()
     def update_text(n):
         s = u'Listening: %s:%r...' % (addr, port)
         if n:
@@ -550,7 +565,7 @@ def run_server(hostkeys, username, pubkeys, homedir, cmdexe,
             else:
                 logging.error('Timeout')
                 t.close()
-        except EOFError as e:
+        except (EOFError, OSError) as e:
             logging.error('Error: %r' % e)
             t.close()
     while sessions:
@@ -562,8 +577,8 @@ def run_server(hostkeys, username, pubkeys, homedir, cmdexe,
 def main(argv):
     import getopt
     def usage():
-        print ('usage: %s [-d] [-l logfile] [-L addr] [-p port]'
-               ' [-u username] [-a authkeys] [-h homedir] [-c cmdexe]' % argv[0])
+        error('Usage: %s [-d] [-l logfile] [-L addr] [-p port]'
+              ' [-u username] [-a authkeys] [-h homedir] [-c cmdexe]' % argv[0])
         return 100
     try:
         (opts, args) = getopt.getopt(argv[1:], 'dl:L:p:u:a:h:c:')
@@ -571,10 +586,12 @@ def main(argv):
         return usage()
     loglevel = logging.INFO
     logfile = None
-    port = 2222
+    if frozen:
+        logfile = os.path.join(APPDATA, 'pyrexecd.log')
+    port = 2200
     addr = '0.0.0.0'
-    username = os.environ.get('USERNAME', 'unknown')
-    homedir = os.environ.get('USERPROFILE', '.')
+    username = win32api.GetUserName()
+    homedir = getpath(shellcon.CSIDL_PROFILE)
     authkeys = []
     cmdexe = ['cmd','/Q']
     for (k, v) in opts:
@@ -586,20 +603,30 @@ def main(argv):
         elif k == '-a': authkeys.append(v)
         elif k == '-h': homedir = v
         elif k == '-c': cmdexe = v
+    if not authkeys:
+        authkeys = [os.path.join(APPDATA, 'authorized_keys')]
+    if not args:
+        args = [os.path.join(APPDATA, 'ssh_host_rsa_key'),
+                os.path.join(APPDATA, 'ssh_host_dsa_key')]
     pubkeys = []
-    for path in (authkeys or ['authorized_keys']):
+    for path in authkeys:
         if os.path.isfile(path):
             pubkeys.extend(get_authorized_keys(path))
     hostkeys = []
-    for path in (args or ['ssh_host_rsa_key', 'ssh_host_dsa_key']):
+    for path in args:
         if os.path.isfile(path):
             hostkeys.append(get_host_key(path))
     if not hostkeys:
-        print('no hostkey is found!')
+        error('No hostkey is found!')
         return 111
     logging.basicConfig(level=loglevel, filename=logfile, filemode='a')
-    PyRexecTrayApp.initialize(basedir=os.path.dirname(argv[0]))
-    run_server(hostkeys, username, pubkeys, homedir, cmdexe,
+    logging.info('Hostkeys: %d' % len(hostkeys))
+    logging.info('Username: %r (pubkeys:%d)' % (username, len(pubkeys)))
+    logging.info('Homedir: %r' % homedir)
+    logging.info('Cmd.exe: %r' % cmdexe)
+    PyRexecTrayApp.initialize(basedir=os.path.join(DATADIR, 'icons'))
+    app = PyRexecTrayApp()
+    run_server(app, hostkeys, username, pubkeys, homedir, cmdexe,
                addr=addr, port=port)
     return
 if __name__ == '__main__': sys.exit(main(sys.argv))
