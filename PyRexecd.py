@@ -37,12 +37,16 @@ def getpath(csidl):
 
 frozen = getattr(sys, 'frozen', False)
 if frozen:
-    APPDATA = os.path.join(getpath(shellcon.CSIDL_APPDATA), 'PyRexecd')
     DATADIR = os.path.dirname(sys.executable)
+else:
+    DATADIR = os.path.dirname(__file__)
+
+windows = (sys.stdout is None)
+if windows:
+    APPDATA = os.path.join(getpath(shellcon.CSIDL_APPDATA), 'PyRexecd')
     error = msgbox
 else:
     APPDATA = '.'
-    DATADIR = os.path.dirname(__file__)
     error = print
 
 
@@ -105,7 +109,8 @@ class SysTrayApp(object):
         if lparam == win32con.WM_LBUTTONDBLCLK:
             menu = self.get_popup()
             wid = win32gui.GetMenuDefaultItem(menu, 0, 0)
-            win32gui.PostMessage(hwnd, win32con.WM_COMMAND, wid, 0)
+            if 0 < wid:
+                win32gui.PostMessage(hwnd, win32con.WM_COMMAND, wid, 0)
         elif lparam == win32con.WM_RBUTTONUP:
             menu = self.get_popup()
             pos = win32gui.GetCursorPos()
@@ -242,7 +247,7 @@ class PyRexecTrayApp(SysTrayApp):
         menu = win32gui.CreatePopupMenu()
         (item, _) = win32gui_struct.PackMENUITEMINFO(text=u'Quit', wID=self.IDI_QUIT)
         win32gui.InsertMenuItem(menu, 0, 1, item)
-        win32gui.SetMenuDefaultItem(menu, 0, self.IDI_QUIT)
+        #win32gui.SetMenuDefaultItem(menu, 0, self.IDI_QUIT)
         return menu
 
     def choose(self, wid):
@@ -303,12 +308,12 @@ class PyRexecSession:
         self.logger = logging.getLogger(name)
         self.app = app
         self.name = name
+        self.chan = chan
         self.homedir = homedir
         self.cmdexe = cmdexe
         self.server = server
         self.bufsize = 512
         self._timeout = time.time()+timeout
-        self._chan = chan
         self._tasks = None
         self._events = []
         return
@@ -348,28 +353,28 @@ class PyRexecSession:
         return
     
     def open(self):
-        self.logger.info('open: %r' % self._chan)
-        self._chan.settimeout(0.05)
+        self.logger.info('open: %r' % self.chan)
+        self.chan.settimeout(0.05)
         self._add_event('open')
         self._tasks = []
         self._proc = None
-        self.start_tasks(self._chan, self.server.command)
+        self.start_tasks(self.server.command)
         return
     
     def close(self, status=0):
-        self.logger.info('close: %r, status=%r' % (self._chan, status))
+        self.logger.info('close: %r, status=%r' % (self.chan, status))
         self._tasks = []
         if self._proc is None:
             status = 0
         else:
             self._proc.terminate()
             status = self._proc.wait()
-        self._chan.send_exit_status(status)
-        self._chan.close()
+        self.chan.send_exit_status(status)
+        self.chan.close()
         self._add_event('closed')
         return
 
-    def start_tasks(self, chan, command):
+    def start_tasks(self, command):
         self.logger.info('start: command: %r' % command)
         try:
             if command is not None and command.startswith('@'):
@@ -382,9 +387,9 @@ class PyRexecSession:
                 text = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
                 win32clipboard.CloseClipboard()
                 self.logger.debug('text=%r' % text)
-                chan.send(text.encode('utf-8'))
+                self.chan.send(text.encode('utf-8'))
             elif command == 'clipset':
-                self._add_task(self.ClipSetter(self, chan))
+                self._add_task(self.ClipSetter(self, self.chan))
             else:
                 if command is None:
                     args = self.cmdexe
@@ -393,8 +398,8 @@ class PyRexecSession:
                 self._proc = Popen(
                     args, stdin=PIPE, stdout=PIPE, stderr=STDOUT,
                     cwd=self.homedir, creationflags=win32con.CREATE_NO_WINDOW)
-                self._add_task(self.ChanForwarder(self, chan, self._proc.stdin))
-                self._add_task(self.PipeForwarder(self, self._proc.stdout, chan))
+                self._add_task(self.ChanForwarder(self, self.chan, self._proc.stdin))
+                self._add_task(self.PipeForwarder(self, self._proc.stdout, self.chan))
         except OSError as e:
             self.logger.error('cannot start: %r' % e)
         return
@@ -585,7 +590,7 @@ def main(argv):
         return usage()
     loglevel = logging.INFO
     logfile = None
-    if frozen:
+    if windows:
         logfile = os.path.join(APPDATA, 'pyrexecd.log')
     port = 2200
     addr = '0.0.0.0'
