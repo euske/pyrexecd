@@ -21,6 +21,7 @@ import win32gui
 import win32gui_struct
 import win32clipboard
 import win32process
+import pywintypes
 from win32com.shell import shell, shellcon
 from io import StringIO
 from subprocess import Popen, PIPE, STDOUT, DEVNULL
@@ -363,7 +364,7 @@ class PyRexecSession:
         self._proc = None
         try:
             self.exec_command(self.server.command)
-        except OSError as e:
+        except (OSError, pywintypes.error) as e:
             self.logger.error('error: %r' % e)
         return
     
@@ -383,11 +384,14 @@ class PyRexecSession:
     def exec_command(self, command):
         self.logger.info('exec_command: %r' % command)
         if command == 'clipget':
-            win32clipboard.OpenClipboard(self.app.hwnd)
-            text = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
-            win32clipboard.CloseClipboard()
-            self.logger.debug('text=%r' % text)
-            self.chan.send(text.encode('utf-8'))
+            try:
+                win32clipboard.OpenClipboard(self.app.hwnd)
+                text = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
+                win32clipboard.CloseClipboard()
+                self.logger.debug('text=%r' % text)
+                self.chan.send(text.encode('utf-8'))
+            except TypeError:
+                self.logger.error('No clipboard text.')
             return
         if command == 'clipset':
             self._add_task(self.ClipSetter(self, self.chan))
@@ -636,7 +640,7 @@ def main(argv):
         app = PyRexecTrayApp()
         run_server(app, sock, hostkeys, username, pubkeys, homedir, cmdexe,
                    msg=('Listening: %s:%r...' % (addr, port)))
-    except (socket.error, OSError) as e:
+    except (OSError, socket.error) as e:
         logging.error('Error: %r' % e)
         error('Error: %r' % e)
     return
