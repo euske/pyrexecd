@@ -20,6 +20,7 @@ import win32api
 import win32gui
 import win32gui_struct
 import win32clipboard
+import win32process
 from win32com.shell import shell, shellcon
 from io import StringIO
 from subprocess import Popen, PIPE, STDOUT, DEVNULL
@@ -29,7 +30,7 @@ from paramiko.py3compat import decodebytes
 
 def msgbox(text, caption='Error'):
     win32gui.MessageBox(None, text, caption,
-                        (win32con.MB_OK | win32con.MB_ERROR))
+                        (win32con.MB_OK | win32con.MB_ICONERROR))
     return
 
 def getpath(csidl):
@@ -37,9 +38,9 @@ def getpath(csidl):
 
 frozen = getattr(sys, 'frozen', False)
 if frozen:
-    DATADIR = os.path.dirname(sys.executable)
+    BASEDIR = os.path.dirname(sys.executable)
 else:
-    DATADIR = os.path.dirname(__file__)
+    BASEDIR = os.path.dirname(__file__)
 
 windows = (sys.stdout is None)
 if windows:
@@ -48,6 +49,8 @@ if windows:
 else:
     APPDATA = '.'
     error = print
+
+STARTUPINFO = win32process.STARTUPINFO()
 
 
 ##  SysTrayApp
@@ -199,10 +202,10 @@ class SysTrayApp(object):
     
     def get_popup(self):
         menu = win32gui.CreatePopupMenu()
-        (item, _) = win32gui_struct.PackMENUITEMINFO(text=u'Quit', wID=self.IDI_QUIT)
+        (item, _) = win32gui_struct.PackMENUITEMINFO(text='Quit', wID=self.IDI_QUIT)
         win32gui.InsertMenuItem(menu, 0, 1, item)
         win32gui.SetMenuDefaultItem(menu, 0, self.IDI_QUIT)
-        (item, _) = win32gui_struct.PackMENUITEMINFO(text=u'Test', wID=123)
+        (item, _) = win32gui_struct.PackMENUITEMINFO(text='Test', wID=123)
         win32gui.InsertMenuItem(menu, 0, 1, item)
         return menu
 
@@ -245,7 +248,7 @@ class PyRexecTrayApp(SysTrayApp):
 
     def get_popup(self):
         menu = win32gui.CreatePopupMenu()
-        (item, _) = win32gui_struct.PackMENUITEMINFO(text=u'Quit', wID=self.IDI_QUIT)
+        (item, _) = win32gui_struct.PackMENUITEMINFO(text='Quit', wID=self.IDI_QUIT)
         win32gui.InsertMenuItem(menu, 0, 1, item)
         #win32gui.SetMenuDefaultItem(menu, 0, self.IDI_QUIT)
         return menu
@@ -358,7 +361,10 @@ class PyRexecSession:
         self._add_event('open')
         self._tasks = []
         self._proc = None
-        self.start_tasks(self.server.command)
+        try:
+            self.exec_command(self.server.command)
+        except OSError as e:
+            self.logger.error('error: %r' % e)
         return
     
     def close(self, status=0):
@@ -374,34 +380,32 @@ class PyRexecSession:
         self._add_event('closed')
         return
 
-    def start_tasks(self, command):
-        self.logger.info('start: command: %r' % command)
-        try:
-            if command is not None and command.startswith('@'):
-                args = self.cmdexe+['/C', command[1:]]
-                Popen(
-                    args, stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL,
-                    cwd=self.homedir)
-            elif command == 'clipget':
-                win32clipboard.OpenClipboard(self.app.hwnd)
-                text = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
-                win32clipboard.CloseClipboard()
-                self.logger.debug('text=%r' % text)
-                self.chan.send(text.encode('utf-8'))
-            elif command == 'clipset':
-                self._add_task(self.ClipSetter(self, self.chan))
-            else:
-                if command is None:
-                    args = self.cmdexe
-                else:
-                    args = self.cmdexe+['/C', command]
-                self._proc = Popen(
-                    args, stdin=PIPE, stdout=PIPE, stderr=STDOUT,
-                    cwd=self.homedir, creationflags=win32con.CREATE_NO_WINDOW)
-                self._add_task(self.ChanForwarder(self, self.chan, self._proc.stdin))
-                self._add_task(self.PipeForwarder(self, self._proc.stdout, self.chan))
-        except OSError as e:
-            self.logger.error('cannot start: %r' % e)
+    def exec_command(self, command):
+        self.logger.info('exec_command: %r' % command)
+        if command == 'clipget':
+            win32clipboard.OpenClipboard(self.app.hwnd)
+            text = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
+            win32clipboard.CloseClipboard()
+            self.logger.debug('text=%r' % text)
+            self.chan.send(text.encode('utf-8'))
+            return
+        if command == 'clipset':
+            self._add_task(self.ClipSetter(self, self.chan))
+            return
+        if command is not None and command.startswith('@'):
+            win32process.CreateProcess(
+                None, command[1:], None, None, 0, 0, None, 
+                self.homedir, STARTUPINFO)
+            return
+        if command is None:
+            args = self.cmdexe
+        else:
+            args = self.cmdexe+['/C', command]
+        self._proc = Popen(
+            args, stdin=PIPE, stdout=PIPE, stderr=STDOUT,
+            cwd=self.homedir, creationflags=win32con.CREATE_NO_WINDOW)
+        self._add_task(self.ChanForwarder(self, self.chan, self._proc.stdin))
+        self._add_task(self.PipeForwarder(self, self._proc.stdout, self.chan))
         return
 
     class ChanForwarder(Thread):
@@ -509,23 +513,13 @@ def get_authorized_keys(path):
     return keys
 
 # run_server
-def run_server(app, hostkeys, username, pubkeys, homedir, cmdexe,
-               addr='127.0.0.1', port=2200):
-    logging.info('Listening: %s:%s...' % (addr, port))
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        reuseaddr = sock.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, reuseaddr | 1)
-    except socket.error:
-        pass
-    sock.bind((addr, port))
-    sock.listen(5)
-    sock.settimeout(0.05)
+def run_server(app, sock, hostkeys, username, pubkeys, homedir, cmdexe,
+               msg='Listening...'):
     def update_text(n):
-        s = u'Listening: %s:%r...' % (addr, port)
         if n:
-            s += u'\n(Clients: %d)' % n
-        app.set_text(s)
+            app.set_text(msg + '\n(Clients: %d)' % n)
+        else:
+            app.set_text(msg)
         return
     update_text(0)
     app.set_busy(False)
@@ -536,13 +530,13 @@ def run_server(app, hostkeys, username, pubkeys, homedir, cmdexe,
             ev = session.get_event()
             if ev == 'open':
                 update_text(len(sessions))
-                app.show_balloon(u'Connected', session.get_name())
+                app.show_balloon('Connected', session.get_name())
                 app.set_busy(True)
             elif ev == 'closing':
                 session.close()
                 sessions.remove(session)
                 update_text(len(sessions))
-                app.show_balloon(u'Disconnected', session.get_name())
+                app.show_balloon('Disconnected', session.get_name())
                 if not sessions:
                     app.set_busy(False)
             elif ev == 'timeout':
@@ -594,6 +588,7 @@ def main(argv):
         logfile = os.path.join(APPDATA, 'pyrexecd.log')
     port = 2200
     addr = '0.0.0.0'
+    reuseaddr = False
     username = win32api.GetUserName()
     homedir = getpath(shellcon.CSIDL_PROFILE)
     authkeys = []
@@ -606,7 +601,7 @@ def main(argv):
         elif k == '-u': username = v
         elif k == '-a': authkeys.append(v)
         elif k == '-h': homedir = v
-        elif k == '-c': cmdexe = v
+        elif k == '-c': cmdexe = v.split(' ')
     if not authkeys:
         authkeys = [os.path.join(APPDATA, 'authorized_keys')]
     if not args:
@@ -623,14 +618,27 @@ def main(argv):
     if not hostkeys:
         error('No hostkey is found!')
         return 111
+    PyRexecTrayApp.initialize(basedir=os.path.join(BASEDIR, 'icons'))
     logging.basicConfig(level=loglevel, filename=logfile, filemode='a')
     logging.info('Hostkeys: %d' % len(hostkeys))
     logging.info('Username: %r (pubkeys:%d)' % (username, len(pubkeys)))
     logging.info('Homedir: %r' % homedir)
     logging.info('Cmd.exe: %r' % cmdexe)
-    PyRexecTrayApp.initialize(basedir=os.path.join(DATADIR, 'icons'))
-    app = PyRexecTrayApp()
-    run_server(app, hostkeys, username, pubkeys, homedir, cmdexe,
-               addr=addr, port=port)
+    logging.info('Listening: %s:%s...' % (addr, port))
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        if reuseaddr:
+            ra = sock.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, ra | 1)
+        sock.bind((addr, port))
+        sock.listen(5)
+        sock.settimeout(0.05)
+        app = PyRexecTrayApp()
+        run_server(app, sock, hostkeys, username, pubkeys, homedir, cmdexe,
+                   msg=('Listening: %s:%r...' % (addr, port)))
+    except (socket.error, OSError) as e:
+        logging.error('Error: %r' % e)
+        error('Error: %r' % e)
     return
+
 if __name__ == '__main__': sys.exit(main(sys.argv))
