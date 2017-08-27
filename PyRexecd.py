@@ -24,7 +24,11 @@ import win32process
 import pywintypes
 from win32com.shell import shell, shellcon
 from io import StringIO
-from subprocess import Popen, PIPE, STDOUT, DEVNULL
+from subprocess import Popen, PIPE
+try:
+    from subprocess import DEVNULL
+except ImportError:
+    DEVNULL = None
 from threading import Thread
 from paramiko.py3compat import decodebytes
 
@@ -43,13 +47,13 @@ if frozen:
 else:
     BASEDIR = os.path.dirname(__file__)
 
-windows = (sys.stdout is None)
+windows = frozen or sys.executable.lower().endswith('pythonw.exe')
 if windows:
     APPDATA = os.path.join(getpath(shellcon.CSIDL_APPDATA), 'PyRexecd')
     error = msgbox
 else:
     APPDATA = '.'
-    error = print
+    def error(x): print(x)      # python2
 
 STARTUPINFO = win32process.STARTUPINFO()
 
