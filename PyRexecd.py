@@ -49,10 +49,8 @@ else:
 
 windows = frozen or sys.executable.lower().endswith('pythonw.exe')
 if windows:
-    APPDATA = os.path.join(getpath(shellcon.CSIDL_APPDATA), 'PyRexecd')
     error = msgbox
 else:
-    APPDATA = '.'
     def error(x): print(x)      # python2
 
 STARTUPINFO = win32process.STARTUPINFO()
@@ -583,38 +581,41 @@ def run_server(app, sock, hostkeys, username, pubkeys, homedir, cmdexe,
 def main(argv):
     import getopt
     def usage():
-        error('Usage: %s [-d] [-l logfile] [-L addr] [-p port]'
+        error('Usage: %s [-d] [-l logfile] [-s sshdir] [-L addr] [-p port]'
               ' [-u username] [-a authkeys] [-h homedir] [-c cmdexe]' % argv[0])
         return 100
     try:
-        (opts, args) = getopt.getopt(argv[1:], 'dl:L:p:u:a:h:c:')
+        (opts, args) = getopt.getopt(argv[1:], 'dl:s:L:p:u:a:h:c:')
     except getopt.GetoptError:
         return usage()
+    homedir = getpath(shellcon.CSIDL_PROFILE)
+    appdata = os.path.join(getpath(shellcon.CSIDL_APPDATA), 'PyRexecd')
     loglevel = logging.INFO
     logfile = None
+    sshdir = appdata
     if windows:
-        logfile = os.path.join(APPDATA, 'pyrexecd.log')
+        logfile = os.path.join(appdata, 'pyrexecd.log')
     port = 2200
     addr = '0.0.0.0'
     reuseaddr = False
     username = win32api.GetUserName()
-    homedir = getpath(shellcon.CSIDL_PROFILE)
     authkeys = []
     cmdexe = ['cmd','/Q']
     for (k, v) in opts:
         if k == '-d': loglevel = logging.DEBUG
         elif k == '-l': logfile = v
         elif k == '-L': addr = v
+        elif k == '-s': sshdir = v
         elif k == '-p': port = int(v)
         elif k == '-u': username = v
         elif k == '-a': authkeys.append(v)
         elif k == '-h': homedir = v
         elif k == '-c': cmdexe = v.split(' ')
     if not authkeys:
-        authkeys = [os.path.join(APPDATA, 'authorized_keys')]
+        authkeys = [os.path.join(sshdir, 'authorized_keys')]
     if not args:
-        args = [os.path.join(APPDATA, 'ssh_host_rsa_key'),
-                os.path.join(APPDATA, 'ssh_host_dsa_key')]
+        args = [os.path.join(sshdir, 'ssh_host_rsa_key'),
+                os.path.join(sshdir, 'ssh_host_dsa_key')]
     pubkeys = []
     for path in authkeys:
         if os.path.isfile(path):
@@ -623,16 +624,18 @@ def main(argv):
     for path in args:
         if os.path.isfile(path):
             hostkeys.append(get_host_key(path))
-    if not hostkeys:
-        error('No hostkey is found!')
-        return 111
-    PyRexecTrayApp.initialize(basedir=os.path.join(BASEDIR, 'icons'))
     logging.basicConfig(level=loglevel, filename=logfile, filemode='a')
+    logging.info('Sshdir: %r' % sshdir)
     logging.info('Hostkeys: %d' % len(hostkeys))
     logging.info('Username: %r (pubkeys:%d)' % (username, len(pubkeys)))
     logging.info('Homedir: %r' % homedir)
     logging.info('Cmd.exe: %r' % cmdexe)
     logging.info('Listening: %s:%s...' % (addr, port))
+    if not hostkeys:
+        logging.error('No hostkey is found!')
+        error('No hostkey is found!')
+        return 111
+    PyRexecTrayApp.initialize(basedir=os.path.join(BASEDIR, 'icons'))
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         if reuseaddr:
