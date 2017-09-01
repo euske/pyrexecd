@@ -386,14 +386,14 @@ class PyRexecSession:
     def exec_command(self, command):
         self.logger.info('exec_command: %r' % command)
         if command == 'clipget':
+            win32clipboard.OpenClipboard(self.app.hwnd)
             try:
-                win32clipboard.OpenClipboard(self.app.hwnd)
                 text = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
-                win32clipboard.CloseClipboard()
                 self.logger.debug('text=%r' % text)
                 self.chan.send(text.encode('utf-8'))
             except TypeError:
                 self.logger.error('No clipboard text.')
+            win32clipboard.CloseClipboard()
             return
         if command == 'clipset':
             self._add_task(self.ClipSetter(self, self.chan))
