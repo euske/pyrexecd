@@ -505,16 +505,17 @@ def get_authorized_keys(path):
     keys = []
     with open(path) as fp:
         for line in fp:
-            (t,_,data) = line.partition(' ')
-            if t == 'ssh-rsa':
+            flds = line.split(' ')
+            if len(flds) < 2: continue
+            if flds[0] == 'ssh-rsa':
                 f = paramiko.RSAKey
-            elif t == 'ssh-dss':
+            elif flds[0] == 'ssh-dss':
                 f = paramiko.DSSKey
-            elif t.startswith('ecdsa-'):
+            elif flds[0].startswith('ecdsa-'):
                 f = paramiko.ECDSAKey
             else:
                 continue
-            data = decodebytes(data.encode('utf-8'))
+            data = decodebytes(flds[1].encode('ascii'))
             keys.append(f(data=data))
     return keys
 
