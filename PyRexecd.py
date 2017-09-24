@@ -20,15 +20,10 @@ import win32api
 import win32gui
 import win32gui_struct
 import win32clipboard
-import win32process
 import pywintypes
 from win32com.shell import shell, shellcon
 from io import StringIO
-from subprocess import Popen, PIPE
-try:
-    from subprocess import DEVNULL
-except ImportError:
-    DEVNULL = None
+from subprocess import Popen, PIPE, STDOUT
 from threading import Thread
 from paramiko.py3compat import decodebytes
 
@@ -41,6 +36,10 @@ def msgbox(text, caption='Error'):
 def getpath(csidl):
     return shell.SHGetSpecialFolderPath(None, csidl, 0)
 
+def shellopen(cmd, path, cwd=None):
+    return win32api.ShellExecute(None, cmd, path, None, cwd,
+                                 win32con.SW_SHOWDEFAULT)
+
 frozen = getattr(sys, 'frozen', False)
 if frozen:
     BASEDIR = os.path.dirname(sys.executable)
@@ -52,8 +51,6 @@ if windows:
     error = msgbox
 else:
     def error(x): print(x)      # python2
-
-STARTUPINFO = win32process.STARTUPINFO()
 
 
 ##  SysTrayApp
@@ -266,9 +263,10 @@ class PyRexecTrayApp(SysTrayApp):
 ##
 class PyRexecServer(paramiko.ServerInterface):
     
-    def __init__(self, username, pubkeys):
+    def __init__(self, username, pubkeys, codec='utf-8'):
         self.username = username
         self.pubkeys = pubkeys
+        self.codec = codec
         self.command = None
         self.ready = False
         return
@@ -299,7 +297,7 @@ class PyRexecServer(paramiko.ServerInterface):
     def check_channel_exec_request(self, channel, command):
         logging.debug('check_channel_exec_request: %r' % command)
         try:
-            self.command = command.decode('utf-8')
+            self.command = command.decode(self.codec)
             self.ready = True
         except UnicodeError:
             return False
@@ -385,23 +383,14 @@ class PyRexecSession:
 
     def exec_command(self, command):
         self.logger.info('exec_command: %r' % command)
-        if command == 'clipget':
-            win32clipboard.OpenClipboard(self.app.hwnd)
-            try:
-                text = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
-                self.logger.debug('text=%r' % text)
-                self.chan.send(text.encode('utf-8'))
-            except TypeError:
-                self.logger.error('No clipboard text.')
-            win32clipboard.CloseClipboard()
+        if command == '@clipget':
+            self._clipget()
             return
-        if command == 'clipset':
+        if command == '@clipset':
             self._add_task(self.ClipSetter(self, self.chan))
             return
         if command is not None and command.startswith('@'):
-            win32process.CreateProcess(
-                None, command[1:], None, None, 0, 0, None, 
-                self.homedir, STARTUPINFO)
+            self._add_task(self.FileOpener(self, self.chan, command[1:]))
             return
         if command is None:
             args = self.cmdexe
@@ -412,6 +401,17 @@ class PyRexecSession:
             cwd=self.homedir, creationflags=win32con.CREATE_NO_WINDOW)
         self._add_task(self.ChanForwarder(self, self.chan, self._proc.stdin))
         self._add_task(self.PipeForwarder(self, self._proc.stdout, self.chan))
+        return
+
+    def _clipget(self):
+        win32clipboard.OpenClipboard(self.app.hwnd)
+        try:
+            text = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
+            self.logger.debug('text=%r' % text)
+            self.chan.send(text.encode(self.server.codec))
+        except TypeError:
+            self.logger.error('No clipboard text.')
+        win32clipboard.CloseClipboard()
         return
 
     class ChanForwarder(Thread):
@@ -459,7 +459,7 @@ class PyRexecSession:
             self.pipe.close()
             return
 
-    class ClipSetter(Thread):
+    class DataReceiver(Thread):
         def __init__(self, session, chan):
             Thread.__init__(self)
             self.session = session
@@ -477,17 +477,43 @@ class PyRexecSession:
                 except (IOError, socket.error) as e:
                     self.session.logger.error('chan error: %r' % e)
                     break
-            self.session.logger.debug('clip data=%r' % self._data)
+            self.session.logger.debug('recv: data=%r' % self._data)
+            self.recv(self._data)
+            return
+        def error(self, s):
+            self.chan.send((s+'\n').encode(self.session.server.codec))
+            self.session.logger.error(s)
+            return
+        
+    class ClipSetter(DataReceiver):
+        def recv(self, data):
             try:
-                text = self._data.decode('utf-8')
+                text = data.decode(self.session.server.codec)
                 win32clipboard.OpenClipboard(self.session.app.hwnd)
                 win32clipboard.EmptyClipboard()
                 win32clipboard.SetClipboardText(text)
                 win32clipboard.CloseClipboard()
             except UnicodeError:
-                pass
+                self.error('encoding error')
+            except pywintypes.error as e:
+                self.error('error: %r' % e)
             return
         
+    class FileOpener(DataReceiver):
+        def __init__(self, session, chan, cmd):
+            PyRexecSession.DataReceiver.__init__(self, session, chan)
+            self.cmd = cmd
+            return
+        def recv(self, data):
+            try:
+                path = data.decode(self.session.server.codec).strip()
+                shellopen(self.cmd, path, cwd=self.session.homedir)
+            except UnicodeError:
+                self.error('encoding error')
+            except pywintypes.error as e:
+                self.error('error: %r' % e)
+            return
+            
 # get_host_key
 def get_host_key(path):
     if path.endswith('rsa_key'):
@@ -612,6 +638,7 @@ def main(argv):
         elif k == '-a': authkeys.append(v)
         elif k == '-h': homedir = v
         elif k == '-c': cmdexe = v.split(' ')
+    os.makedirs(sshdir, exist_ok=True)
     if not authkeys:
         authkeys = [os.path.join(sshdir, 'authorized_keys')]
     if not args:
@@ -633,6 +660,7 @@ def main(argv):
     logging.info('Cmd.exe: %r' % cmdexe)
     logging.info('Listening: %s:%s...' % (addr, port))
     if not hostkeys:
+        shellopen('explore', sshdir)
         logging.error('No hostkey is found!')
         error('No hostkey is found!')
         return 111
