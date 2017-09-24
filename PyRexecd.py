@@ -623,7 +623,7 @@ def main(argv):
     if windows:
         logfile = os.path.join(appdata, 'pyrexecd.log')
     port = 2200
-    addr = '0.0.0.0'
+    addr = '127.0.0.1'
     reuseaddr = False
     username = win32api.GetUserName()
     authkeys = []
