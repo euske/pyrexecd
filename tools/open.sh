@@ -1,12 +1,11 @@
 ##  bash function
 
-# setup:
-#   WINDOWS_HOSTNAME
-#   BASE_LOCAL
-#   BASE_REMOTE
-
 # usage:
 #   $ open path
+
+WINDOWS_HOSTNAME=windows
+BASE_LOCAL=$HOME
+BASE_REMOTE='C:\Users\euske'
 
 open ()
 {
@@ -20,8 +19,8 @@ open ()
 	echo "invalid path: $1";
 	return 1;
     fi;
-    a=$BASE_REMOTE${a#$BASE_LOCAL};
-    a=${a//\//\\};
+    a=${a#$BASE_LOCAL};
+    a=$BASE_REMOTE${a//\//\\};
     echo "opening: $a";
-    command ssh "$WINDOWS_HOSTNAME" "@explorer $a"
+    echo "$a" | command ssh "$WINDOWS_HOSTNAME" @open
 }
