@@ -638,7 +638,10 @@ def main(argv):
         elif k == '-a': authkeys.append(v)
         elif k == '-h': homedir = v
         elif k == '-c': cmdexe = v.split(' ')
-    os.makedirs(sshdir, exist_ok=True)
+    try:
+        os.makedirs(sshdir)
+    except OSError:
+        pass
     if not authkeys:
         authkeys = [os.path.join(sshdir, 'authorized_keys')]
     if not args:
