@@ -2,6 +2,8 @@
 
 PyRexecd is a standalone SSH server for Windows.
 
+![PyRexecd Screenshot](docs/pyrexecd.gif)
+
 ## Prerequisites:
 
   * Python 3 (or 2)
