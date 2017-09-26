@@ -5,7 +5,7 @@
 
 WINDOWS_HOSTNAME=windows
 BASE_LOCAL=$HOME
-BASE_REMOTE='C:\Users\euske'
+BASE_REMOTE=.
 
 open ()
 {
