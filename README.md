@@ -24,7 +24,7 @@ PyRexecd is a standalone SSH server for Windows.
   1. Run PyRexec.py. It creates an config directory
      (AppData\Roaming\PyRexecd) and opens it.
   1. Create a new ssh host key via OpenSSH and place it in the config dir.
-    $ ssh-keygen -N '' -f ssh_host_rsa_key
+    `$ ssh-keygen -N '' -f ssh_host_rsa_key`
   1. Copy your public key into the config dir.
     > copy your\id_rsa.pub authorized_keys
 
