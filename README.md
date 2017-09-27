@@ -7,17 +7,16 @@ PyRexecd is a standalone SSH server for Windows.
 ## Features:
 
   * It is just a normal Win32 app (not a service) that resides in the SysTray.
-  * For a single user only.
-  * Notifies who has just connected.
+  * Supports a single user / pubkey auth only.
+  * Connection notification.
   * Sends/Receives the clipboard contents via stdin/stdout (text only).
-  * Supports public key auth only.
 
 ## Prerequisites:
 
   * Python 3 (or 2)
   * Paramiko (install via pip)
   * PyWin32 - http://sourceforge.net/projects/pywin32/
-  * cx_Freeze (optional)
+  * cx_Freeze (optional - if you want to build .exe)
 
 ## How to Setup:
 
