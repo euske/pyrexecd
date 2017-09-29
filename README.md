@@ -20,12 +20,12 @@ PyRexecd is a standalone SSH server for Windows.
 
 ## How to Setup:
 
-  1. Run PyRexec.py. It creates an config directory
+  1. Run PyRexec.py. It creates an empty config directory
      (AppData\Roaming\PyRexecd) and opens it.
   1. Create a new ssh host key via OpenSSH and place it in the config dir.
     `$ ssh-keygen -N '' -f ssh_host_rsa_key`
   1. Copy your public key into the config dir.
-    > copy your\id_rsa.pub authorized_keys
+    `> copy your\id_rsa.pub authorized_keys`
 
 ## Command Line Sytax:
 
@@ -33,15 +33,27 @@ PyRexecd is a standalone SSH server for Windows.
                    [-u username] [-a authkeys] [-h homedir] [-c cmdexe]
 		   hostkeys ...
 		   
-  * -d : Turns on Debug mode (verbose logging).
-  * -l logfile : Log file path (default: pyrexecd.log).
-  * -s sshdir : Config directory path. (default: AppData\Roaming\PyRexecd)
-  * -p port : Specifies the listen port (default: 2200). 
-  * -L a.b.c.d : Specifies the listen address (default: 127.0.0.1).
-  * -c cmdexe : cmd.exe path. (default: cmd.exe)
-  * -u username : Username.
-  * -a authkeys : authorized_keys path. (default: authorized_keys)
-  * -h homedir : Home directory path. (default: %UserProfile%)
+  * `-d` : Turns on Debug mode (verbose logging).
+  * `-l logfile` : Log file path (default: `pyrexecd.log`).
+  * `-s sshdir` : Config directory path. (default: `AppData\Roaming\PyRexecd`)
+  * `-p port` : Specifies the listen port (default: `2200`). 
+  * `-L a.b.c.d` : Specifies the listen address (default: `127.0.0.1`).
+  * `-c cmdexe` : cmd.exe path. (default: `cmd.exe`)
+  * `-u username` : Username.
+  * `-a authkeys` : authorized_keys path. (default: `authorized_keys`)
+  * `-h homedir` : Home directory path. (default: `%UserProfile%`)
+
+## Special commands:
+
+  Certain SSH command is recognized as special commands:
+
+  * `@clipget` : Receives the clipboard text from Windows.
+    (ex. `ssh windows @clipget > clipboard.txt`)
+  * `@clipset` : Sends the clipboard text to Windows.
+    (ex. `echo foo | ssh windows @clipset`)
+  * `@open`, `@edit`, `@print` and `@explore` : Windows shell operation.
+    The target pathname should be given from stdin.
+    (ex. `echo C:\User\euske\foo.txt | ssh windows @edit`)
 
 ## How to Build .exe (requires cx_Freeze):
 
