@@ -6,10 +6,10 @@ PyRexecd is a standalone SSH server for Windows.
 
 ## Features:
 
-  * It is just a normal Win32 app (not a service) that resides in the SysTray.
-  * Supports a single user / pubkey auth only.
-  * Connection notification.
-  * Sends/Receives the clipboard contents via stdin/stdout (text only).
+  * Standalone Win32 app (not a service) that resides in the SysTray.
+  * Single user / pubkey auth only.
+  * Notifies incoming connections via popup.
+  * Sends/Receives the clipboard text via stdin/stdout.
 
 ## Prerequisites:
 
@@ -51,7 +51,7 @@ PyRexecd is a standalone SSH server for Windows.
     `$ ssh windows @clipget > clipboard.txt`
   * `@clipset` : Sends the clipboard text to Windows.<br>
     `$ echo foo | ssh windows @clipset`
-  * `@open`, `@edit`, `@print` and `@explore` : Windows shell operation.
+  * `@open`, `@edit`, and `@print` : Windows shell operation.
     The target pathname should be given from stdin.<br>
     `$ echo C:\User\euske\foo.txt | ssh windows @edit`
 
