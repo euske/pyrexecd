@@ -596,7 +596,7 @@ def run_server(app, sock, hostkeys, username, pubkeys, homedir, cmdexe,
             else:
                 logging.error('Timeout')
                 t.close()
-        except (EOFError, OSError) as e:
+        except Exception as e:
             logging.error('Error: %r' % e)
             t.close()
     while sessions:
