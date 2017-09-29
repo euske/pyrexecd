@@ -22,9 +22,9 @@ PyRexecd is a standalone SSH server for Windows.
 
   1. Run PyRexec.py. It creates an empty config directory
      (AppData\Roaming\PyRexecd) and opens it.
-  1. Create a new ssh host key via OpenSSH and place it in the config dir.
+  1. Create a new ssh host key via OpenSSH and place it in the config dir.<br>
     `$ ssh-keygen -N '' -f ssh_host_rsa_key`
-  1. Copy your public key into the config dir.
+  1. Copy your public key into the config dir.<br>
     `> copy your\id_rsa.pub authorized_keys`
 
 ## Command Line Sytax:
@@ -47,12 +47,12 @@ PyRexecd is a standalone SSH server for Windows.
 
   Certain SSH command is recognized as special commands:
 
-  * `@clipget` : Receives the clipboard text from Windows.
+  * `@clipget` : Receives the clipboard text from Windows.<br>
     (ex. `ssh windows @clipget > clipboard.txt`)
-  * `@clipset` : Sends the clipboard text to Windows.
+  * `@clipset` : Sends the clipboard text to Windows.<br>
     (ex. `echo foo | ssh windows @clipset`)
   * `@open`, `@edit`, `@print` and `@explore` : Windows shell operation.
-    The target pathname should be given from stdin.
+    The target pathname should be given from stdin.<br>
     (ex. `echo C:\User\euske\foo.txt | ssh windows @edit`)
 
 ## How to Build .exe (requires cx_Freeze):
