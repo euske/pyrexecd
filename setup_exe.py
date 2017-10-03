@@ -1,5 +1,4 @@
 # setup.py
-import sys
 from cx_Freeze import setup, Executable
 
 build_exe_options = {
@@ -10,25 +9,20 @@ build_exe_options = {
 }
 
 exe = Executable(
-    'PyRexecd.py',
+    'PyRexecd.pyw',
     base = 'Win32GUI',
     icon = 'icons/PyRexec.ico'
 )
     
 setup(
     name = 'PyRexecd',
-    version = '0.2',
+    version = '0.2.1',
     description = 'Standalone SSH server for Windows',
     url = 'https://github.com/euske/pyrexecd',
     author = 'Yusuke Shinyama',
     author_email = 'yusuke@shinyama.jp',
     license = 'MIT',
     packages = [],
-    install_requires = [
-        'paramiko',
-        'pypiwin32',
-        'cx_Freeze',
-    ],
     executables = [exe],
     options = { 'build_exe': build_exe_options },
     classifiers = [

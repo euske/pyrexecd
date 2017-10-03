@@ -609,7 +609,8 @@ def main(argv):
     import getopt
     def usage():
         error('Usage: %s [-d] [-l logfile] [-s sshdir] [-L addr] [-p port]'
-              ' [-u username] [-a authkeys] [-h homedir] [-c cmdexe]' % argv[0])
+              ' [-c cmdexe] [-u username] [-a authkeys] [-h homedir]'
+              ' ssh_host_key ...' % argv[0])
         return 100
     try:
         (opts, args) = getopt.getopt(argv[1:], 'dl:s:L:p:u:a:h:c:')
