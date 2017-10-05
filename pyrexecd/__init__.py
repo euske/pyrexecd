@@ -41,11 +41,6 @@ def shellopen(cmd, path, cwd=None):
                                  win32con.SW_SHOWDEFAULT)
 
 frozen = getattr(sys, 'frozen', False)
-if frozen:
-    BASEDIR = os.path.dirname(sys.executable)
-else:
-    BASEDIR = os.path.dirname(__file__)
-
 windows = frozen or sys.executable.lower().endswith('pythonw.exe')
 if windows:
     error = msgbox
@@ -221,15 +216,16 @@ class SysTrayApp(object):
 class PyRexecTrayApp(SysTrayApp):
 
     @classmethod
-    def initialize(klass, basedir='icons'):
+    def initialize(klass, basedir):
         SysTrayApp.initialize()
+        icons = os.path.join(basedir, 'icons')
         klass.ICON_IDLE = win32gui.LoadImage(
-            0, os.path.join(basedir, 'PyRexec.ico'),
+            0, os.path.join(icons, 'PyRexec.ico'),
             win32con.IMAGE_ICON,
             win32con.LR_DEFAULTSIZE, win32con.LR_DEFAULTSIZE,
             win32con.LR_LOADFROMFILE)
         klass.ICON_BUSY = win32gui.LoadImage(
-            0, os.path.join(basedir, 'PyRexecConnected.ico'),
+            0, os.path.join(icons, 'PyRexecConnected.ico'),
             win32con.IMAGE_ICON,
             win32con.LR_DEFAULTSIZE, win32con.LR_DEFAULTSIZE,
             win32con.LR_LOADFROMFILE)
@@ -668,7 +664,7 @@ def main(argv):
         logging.error('No hostkey is found!')
         error('No hostkey is found!')
         return 111
-    PyRexecTrayApp.initialize(basedir=os.path.join(BASEDIR, 'icons'))
+    PyRexecTrayApp.initialize(os.path.dirname(__file__))
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         if reuseaddr:
