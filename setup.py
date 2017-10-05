@@ -1,18 +1,6 @@
 # setup.py
-from cx_Freeze import setup, Executable
+from setuptools import setup
 
-build_exe_options = {
-    'optimize': 2,
-    'packages': ['idna'],
-    'includes': ['_cffi_backend'],
-}
-
-exe = Executable(
-    'PyRExecd.pyw',
-    base = 'Win32GUI',
-    icon = 'pyrexecd/icons/PyRexec.ico'
-)
-    
 setup(
     name = 'PyRExecd',
     version = '0.2.2',
@@ -22,8 +10,14 @@ setup(
     author_email = 'yusuke@shinyama.jp',
     license = 'MIT',
     packages = ['pyrexecd'],
-    executables = [exe],
-    options = { 'build_exe': build_exe_options },
+    package_data = {
+        'pyrexecd': ['icons/*.ico'],
+    },
+    install_requires = [
+        'paramiko',
+        'pypiwin32',
+    ],
+    scripts = ['PyRExecd.pyw'],
     classifiers = [
         'Development Status :: 4 - Beta',
         'Environment :: Win32 (MS Windows)',
