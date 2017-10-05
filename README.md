@@ -20,7 +20,7 @@ PyRexecd is a standalone SSH server for Windows.
 
 ## How to Run:
 
-  1. `> pip install paramiko pypiwin32`
+  1. `> pip install pyrexecd`
   1. Run PyRexec.pyw. It opens a config directory
      (`AppData\Roaming\PyRexecd`).
   1. Create a new ssh host key via OpenSSH and place it in the config dir.<br>
