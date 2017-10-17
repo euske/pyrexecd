@@ -639,31 +639,39 @@ def main(argv):
         os.makedirs(sshdir)
     except OSError:
         pass
-    if not authkeys:
-        authkeys = [os.path.join(sshdir, 'authorized_keys')]
-    if not args:
-        args = [os.path.join(sshdir, 'ssh_host_rsa_key'),
-                os.path.join(sshdir, 'ssh_host_dsa_key')]
-    pubkeys = []
-    for path in authkeys:
-        if os.path.isfile(path):
-            pubkeys.extend(get_authorized_keys(path))
+    logging.basicConfig(level=loglevel, filename=logfile, filemode='a')
+    logging.info('Sshdir: %r' % sshdir)
     hostkeys = []
     for path in args:
         if os.path.isfile(path):
             hostkeys.append(get_host_key(path))
-    logging.basicConfig(level=loglevel, filename=logfile, filemode='a')
-    logging.info('Sshdir: %r' % sshdir)
+    if not hostkeys:
+        path = os.path.join(sshdir, 'ssh_host_rsa_key')
+        if os.path.isfile(path):
+            hostkeys.append(get_host_key(path))
+        else:
+            key = paramiko.RSAKey.generate(2048)
+            key.write_private_key_file(path)
+            sig = ':'.join( '%02x' % b for b in key.get_fingerprint() )
+            logging.info('Hostkey is created: %r' % sig)
+            error('Hostkey is created: %r' % sig)
+            hostkeys.append(key)
     logging.info('Hostkeys: %d' % len(hostkeys))
+    if not authkeys:
+        authkeys = [os.path.join(sshdir, 'authorized_keys')]
+    pubkeys = []
+    for path in authkeys:
+        if os.path.isfile(path):
+            pubkeys.extend(get_authorized_keys(path))
+    if not pubkeys:
+        shellopen('explore', sshdir)
+        logging.error('No authorized_keys found!')
+        error('No authorized_keys found!')
+        return
     logging.info('Username: %r (pubkeys:%d)' % (username, len(pubkeys)))
     logging.info('Homedir: %r' % homedir)
     logging.info('Cmd.exe: %r' % cmdexe)
     logging.info('Listening: %s:%s...' % (addr, port))
-    if not hostkeys:
-        shellopen('explore', sshdir)
-        logging.error('No hostkey is found!')
-        error('No hostkey is found!')
-        return 111
     PyRexecTrayApp.initialize(os.path.dirname(__file__))
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

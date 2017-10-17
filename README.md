@@ -18,14 +18,12 @@ PyRexecd is a standalone SSH server for Windows.
   * PyWin32 - http://sourceforge.net/projects/pywin32/
   * cx_Freeze (optional) - https://pypi.python.org/pypi/cx_Freeze
 
-## How to Run:
+## How to Use:
 
   1. `> pip install pyrexecd`
-  1. Run PyRexec.pyw. It opens a config directory
+  1. Run PyRexec.pyw. It generates a new host key and opens a config directory 
      (`AppData\Roaming\PyRexecd`).
-  1. Create a new ssh host key via OpenSSH and place it in the config dir.<br>
-    `$ ssh-keygen -N '' -f ssh_host_rsa_key`
-  1. Copy your public key into the config dir.<br>
+  1. Put your public key into the config dir.<br>
     `> copy your\id_rsa.pub authorized_keys`
   1. Run PyRexec.pyw again.
 
