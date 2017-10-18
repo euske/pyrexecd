@@ -21,11 +21,12 @@ PyRexecd is a standalone SSH server for Windows.
 ## How to Use:
 
   1. `> pip install pyrexecd`
-  1. Run PyRexec.pyw. It generates a new host key and opens a config directory 
+  1. Run `PyRexec.pyw`. <br>
+     It generates a new host key and opens a config directory 
      (`AppData\Roaming\PyRexecd`).
-  1. Put your public key into the config dir.<br>
+  1. Put your public key into the config dir. <br>
     `> copy your\id_rsa.pub authorized_keys`
-  1. Run PyRexec.pyw again.
+  1. Run `PyRexec.pyw` to start the server.
 
 ## Command Line Sytax:
 

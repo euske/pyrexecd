@@ -15,7 +15,7 @@ exe = Executable(
     
 setup(
     name = 'PyRExecd',
-    version = '0.2.2',
+    version = '0.3.0',
     description = 'Standalone SSH server for Windows',
     url = 'https://github.com/euske/pyrexecd',
     author = 'Yusuke Shinyama',
