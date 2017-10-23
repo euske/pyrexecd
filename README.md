@@ -28,7 +28,7 @@ PyRexecd is a standalone SSH server for Windows.
     `> copy your\id_rsa.pub authorized_keys`
   1. Run `PyRexec.pyw` to start the server.
 
-## Command Line Sytax:
+## Command Line Syntax:
 
     > pyrexecd.exe [-d] [-l logfile] [-s sshdir] [-L addr] [-p port]
                    [-c cmdexe] [-u username] [-a authkeys] [-h homedir]
