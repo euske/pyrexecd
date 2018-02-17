@@ -232,11 +232,21 @@ class PyRexecTrayApp(SysTrayApp):
         return
 
     def __init__(self, name='PyRexec'):
+        self.busy = False
         SysTrayApp.__init__(self, name)
         return
 
+    def open(self):
+        self.update_icon()
+        return
+
     def set_busy(self, busy):
-        if busy:
+        self.busy = busy
+        self.update_icon()
+        return
+
+    def update_icon(self):
+        if self.busy:
             self.set_icon(self.ICON_BUSY)
         else:
             self.set_icon(self.ICON_IDLE)
@@ -551,7 +561,6 @@ def run_server(app, sock, hostkeys, username, pubkeys, homedir, cmdexe,
             app.set_text(msg)
         return
     update_text(0)
-    app.set_busy(False)
     sessions = []
     while app.idle():
         for session in sessions[:]:
