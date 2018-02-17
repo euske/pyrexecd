@@ -10,6 +10,7 @@ PyRexecd is a standalone SSH server for Windows.
   * Supports a single user / pubkey auth only.
   * Notifies incoming connections via popup.
   * Sends/Receives the clipboard text via stdin/stdout.
+  * PyPI Project page: https://pypi.python.org/pypi/PyRexecd/
 
 ## Prerequisites:
 
