@@ -22,7 +22,7 @@ PyRexecd is a standalone SSH server for Windows.
 
   1. `> pip install pyrexecd`
   1. Run `PyRexec.pyw`. <br>
-     It generates a new host key and opens a config directory 
+     It generates a new host key and opens a config directory
      (`AppData\Roaming\PyRexecd`).
   1. Put your public key into the config dir. <br>
     `> copy your\id_rsa.pub authorized_keys`
@@ -35,12 +35,12 @@ PyRexecd is a standalone SSH server for Windows.
     > pyrexecd.exe [-d] [-l logfile] [-s sshdir] [-L addr] [-p port]
                    [-c cmdexe] [-u username] [-a authkeys] [-h homedir]
 		   ssh_host_key ...
-		   
+
   * `-d` : Turns on Debug mode (verbose logging).
   * `-l logfile` : Log file path (default: `pyrexecd.log`).
   * `-s sshdir` : Config directory path. (default: `AppData\Roaming\PyRexecd`)
   * `-L a.b.c.d` : Specifies the listen address (default: `127.0.0.1`).
-  * `-p port` : Specifies the listen port (default: `2200`). 
+  * `-p port` : Specifies the listen port (default: `2200`).
   * `-c cmdexe` : cmd.exe path. (default: `cmd.exe`)
   * `-u username` : Username.
   * `-a authkeys` : authorized_keys path. (default: `authorized_keys`)

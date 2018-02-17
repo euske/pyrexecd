@@ -100,7 +100,7 @@ class SysTrayApp(object):
         self = klass._instance[hwnd]
         self.open()
         return
-        
+
     @classmethod
     def _notify(klass, hwnd, msg, wparam, lparam):
         self = klass._instance[hwnd]
@@ -184,7 +184,7 @@ class SysTrayApp(object):
             (self.hwnd, 0, win32gui.NIF_TIP,
              0, 0, text))
         return
-        
+
     def show_balloon(self, title, text, timeout=1):
         self.logger.info('show_balloon: %r, %r' % (title, text))
         win32gui.Shell_NotifyIcon(
@@ -194,7 +194,7 @@ class SysTrayApp(object):
         return
 
     IDI_QUIT = 100
-    
+
     def get_popup(self):
         menu = win32gui.CreatePopupMenu()
         (item, _) = win32gui_struct.PackMENUITEMINFO(text='Quit', wID=self.IDI_QUIT)
@@ -258,7 +258,7 @@ class PyRexecTrayApp(SysTrayApp):
 ##  PyRexecServer
 ##
 class PyRexecServer(paramiko.ServerInterface):
-    
+
     def __init__(self, username, pubkeys, codec='utf-8'):
         self.username = username
         self.pubkeys = pubkeys
@@ -271,20 +271,20 @@ class PyRexecServer(paramiko.ServerInterface):
         if username == self.username:
             return 'publickey'
         return ''
-    
+
     def check_auth_publickey(self, username, key):
         logging.debug('check_auth_publickey: %r' % username)
         if username == self.username:
             for k in self.pubkeys:
                 if k == key: return paramiko.AUTH_SUCCESSFUL
         return paramiko.AUTH_FAILED
-    
+
     def check_channel_request(self, kind, chanid):
         logging.debug('check_channel_request: %r' % kind)
         if kind == 'session':
             return paramiko.OPEN_SUCCEEDED
         return paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
-    
+
     def check_channel_shell_request(self, channel):
         logging.debug('check_channel_shell_request')
         self.ready = True
@@ -336,7 +336,7 @@ class PyRexecSession:
     def get_event(self):
         if not self._events: return None
         return self._events.pop(0)
-    
+
     def idle(self):
         if self._tasks is None:
             if self.server.ready:
@@ -351,7 +351,7 @@ class PyRexecSession:
         else:
             self._add_event('closing')
         return
-    
+
     def open(self):
         self.logger.info('open: %r' % self.chan)
         self.chan.settimeout(0.05)
@@ -363,7 +363,7 @@ class PyRexecSession:
         except (OSError, pywintypes.error) as e:
             self.logger.error('error: %r' % e)
         return
-    
+
     def close(self, status=0):
         self.logger.info('close: %r, status=%r' % (self.chan, status))
         self._tasks = []
@@ -432,7 +432,7 @@ class PyRexecSession:
             self.session.logger.debug('chan end')
             self.pipe.close()
             return
-        
+
     class PipeForwarder(Thread):
         def __init__(self, session, pipe, chan):
             Thread.__init__(self)
@@ -480,7 +480,7 @@ class PyRexecSession:
             self.chan.send((s+'\n').encode(self.session.server.codec))
             self.session.logger.error(s)
             return
-        
+
     class ClipSetter(DataReceiver):
         def recv(self, data):
             try:
@@ -494,7 +494,7 @@ class PyRexecSession:
             except pywintypes.error as e:
                 self.error('error: %r' % e)
             return
-        
+
     class FileOpener(DataReceiver):
         def __init__(self, session, chan, cmd):
             PyRexecSession.DataReceiver.__init__(self, session, chan)
@@ -509,7 +509,7 @@ class PyRexecSession:
             except pywintypes.error as e:
                 self.error('error: %r' % e)
             return
-            
+
 # get_host_key
 def get_host_key(path):
     if path.endswith('rsa_key'):

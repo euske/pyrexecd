@@ -12,7 +12,7 @@ exe = Executable(
     base = 'Win32GUI',
     icon = 'pyrexecd/icons/PyRexec.ico'
 )
-    
+
 setup(
     name = 'PyRExecd',
     version = '0.3.0',
