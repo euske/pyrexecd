@@ -22,17 +22,24 @@ rexec_cmd ()
     host=$1; shift;
     cmd=$1; shift
     path=$1; shift;
-    if [[ $path =~ ^/ ]]; then
-	:;
-    else
-	path=$PWD/${path:-.};
-    fi;
-    if [[ ! $path =~ ^$BASE_LOCAL ]]; then
-	echo "Invalid path: $1";
-	return 1;
-    fi;
-    path=${path#$BASE_LOCAL};
-    path=$BASE_REMOTE${path//\//\\};
+    case "$path" in
+    C:*|http:*|https:*)
+        :
+        ;;
+    *)
+        if [[ $path =~ ^/ ]]; then
+	    :;
+        else
+	    path=$PWD/${path:-.};
+        fi;
+        if [[ ! $path =~ ^$BASE_LOCAL ]]; then
+	    echo "Invalid path: $1";
+	    return 1;
+        fi;
+        path=${path#$BASE_LOCAL};
+        path=$BASE_REMOTE${path//\//\\};
+        ;;
+    esac
     echo "Sending: $cmd for $path";
     echo "$path" | command ssh "$host" "$cmd"
 }
@@ -40,3 +47,4 @@ rexec_cmd ()
 open() { rexec_cmd "$WINDOWS_HOST" @open "$@"; }
 edit() { rexec_cmd "$WINDOWS_HOST" @edit "$@"; }
 print() { rexec_cmd "$WINDOWS_HOST" @print "$@"; }
+explore() { rexec_cmd "$WINDOWS_HOST" @explore "$@"; }
