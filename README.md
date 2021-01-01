@@ -14,7 +14,7 @@ PyRexecd is a standalone SSH server for Windows.
 
 ## Prerequisites:
 
-  * Python 3 (or 2) - http://www.python.org/
+  * Python 3 - http://www.python.org/
   * Paramiko - http://www.paramiko.org/
   * PyWin32 - http://sourceforge.net/projects/pywin32/
   * cx_Freeze (optional) - https://pypi.python.org/pypi/cx_Freeze
