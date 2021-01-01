@@ -40,12 +40,11 @@ def shellopen(cmd, path, cwd=None):
     return win32api.ShellExecute(None, cmd, path, None, cwd,
                                  win32con.SW_SHOWDEFAULT)
 
-frozen = getattr(sys, 'frozen', False)
-windows = frozen or sys.executable.lower().endswith('pythonw.exe')
+windows = (sys.stdout is None)
 if windows:
     error = msgbox
 else:
-    def error(x): print(x)      # python2
+    error = print
 
 
 ##  SysTrayApp
@@ -355,7 +354,7 @@ class PyRexecSession:
                 self._add_event('timeout')
         elif self._tasks:
             for task in self._tasks:
-                if not task.isAlive():
+                if not task.is_alive():
                     self._add_event('closing')
                     break
         else:
