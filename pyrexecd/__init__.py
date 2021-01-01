@@ -526,7 +526,9 @@ def get_host_key(path):
     elif path.endswith('dsa_key'):
         f = paramiko.DSSKey
     elif path.endswith('ecdsa_key'):
-        f = paramiko.ECDSAKay
+        f = paramiko.ECDSAKey
+    elif path.endswith('ed25519_key'):
+        f = paramiko.Ed25519Key
     else:
         raise ValueError(path)
     return f(filename=path)
@@ -544,6 +546,8 @@ def get_authorized_keys(path):
                 f = paramiko.DSSKey
             elif flds[0].startswith('ecdsa-'):
                 f = paramiko.ECDSAKey
+            elif flds[0].startswith('ssh-ed25519'):
+                f = paramiko.Ed25519Key
             else:
                 continue
             data = decodebytes(flds[1].encode('ascii'))
