@@ -147,7 +147,7 @@ class SysTrayApp(object):
             0, 0, win32con.CW_USEDEFAULT, win32con.CW_USEDEFAULT, 0, 0,
             self.WNDCLASS.hInstance, None)
         self._create(self.hwnd, self)
-        self.logger.info('create: name=%r' % name)
+        self.logger.info(f'create: name={name!r}')
         return
 
     def open(self):
@@ -169,7 +169,7 @@ class SysTrayApp(object):
         return
 
     def set_icon(self, icon):
-        self.logger.info('set_icon: %r' % icon)
+        self.logger.info(f'set_icon: {icon!r}')
         win32gui.Shell_NotifyIcon(
             win32gui.NIM_MODIFY,
             (self.hwnd, 0, win32gui.NIF_ICON,
@@ -177,7 +177,7 @@ class SysTrayApp(object):
         return
 
     def set_text(self, text):
-        self.logger.info('set_text: %r' % text)
+        self.logger.info(f'set_text: {text!r}')
         win32gui.Shell_NotifyIcon(
             win32gui.NIM_MODIFY,
             (self.hwnd, 0, win32gui.NIF_TIP,
@@ -185,7 +185,7 @@ class SysTrayApp(object):
         return
 
     def show_balloon(self, title, text, timeout=1):
-        self.logger.info('show_balloon: %r, %r' % (title, text))
+        self.logger.info(f'show_balloon: {title!r}, {text!r}')
         win32gui.Shell_NotifyIcon(
             win32gui.NIM_MODIFY,
             (self.hwnd, 0, win32gui.NIF_INFO,
@@ -204,7 +204,7 @@ class SysTrayApp(object):
         return menu
 
     def choose(self, wid):
-        self.logger.info('choose: wid=%r' % wid)
+        self.logger.info(f'choose: wid={wid!r}')
         if wid == self.IDI_QUIT:
             self.close()
         return
@@ -282,14 +282,14 @@ class PyRexecServer(paramiko.ServerInterface):
         return ''
 
     def check_auth_publickey(self, username, key):
-        logging.debug('check_auth_publickey: %r' % username)
+        logging.debug(f'check_auth_publickey: {username!r}')
         if username == self.username:
             for k in self.pubkeys:
                 if k == key: return paramiko.AUTH_SUCCESSFUL
         return paramiko.AUTH_FAILED
 
     def check_channel_request(self, kind, chanid):
-        logging.debug('check_channel_request: %r' % kind)
+        logging.debug(f'check_channel_request: {kind!r}')
         if kind == 'session':
             return paramiko.OPEN_SUCCEEDED
         return paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
@@ -300,7 +300,7 @@ class PyRexecServer(paramiko.ServerInterface):
         return True
 
     def check_channel_exec_request(self, channel, command):
-        logging.debug('check_channel_exec_request: %r' % command)
+        logging.debug(f'check_channel_exec_request: {command!r}')
         try:
             self.command = command.decode(self.codec)
             self.ready = True
@@ -328,7 +328,7 @@ class PyRexecSession:
         return
 
     def __repr__(self):
-        return ('<%s: %s>' % (self.__class__.__name__, self.name))
+        return (f'<{self.__class__.__name__}: {self.name}>')
 
     def _add_task(self, task):
         self._tasks.append(task)
@@ -362,7 +362,7 @@ class PyRexecSession:
         return
 
     def open(self):
-        self.logger.info('open: %r' % self.chan)
+        self.logger.info(f'open: {self.chan!r}')
         self.chan.settimeout(0.05)
         self._add_event('open')
         self._tasks = []
@@ -370,11 +370,11 @@ class PyRexecSession:
         try:
             self.exec_command(self.server.command)
         except (OSError, pywintypes.error) as e:
-            self.logger.error('error: %r' % e)
+            self.logger.error(f'error: {e!r}')
         return
 
     def close(self, status=0):
-        self.logger.info('close: %r, status=%r' % (self.chan, status))
+        self.logger.info(f'close: {self.chan!r}, status={status!r}')
         self._tasks = []
         if self._proc is None:
             status = 0
@@ -387,7 +387,7 @@ class PyRexecSession:
         return
 
     def exec_command(self, command):
-        self.logger.info('exec_command: %r' % command)
+        self.logger.info(f'exec_command: {command!r}')
         if command == '@clipget':
             self._clipget()
             return
@@ -412,7 +412,7 @@ class PyRexecSession:
         win32clipboard.OpenClipboard(self.app.hwnd)
         try:
             text = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
-            self.logger.debug('text=%r' % text)
+            self.logger.debug(f'text={text!r}')
             self.chan.send(text.encode(self.server.codec))
         except TypeError:
             self.logger.error('No clipboard text.')
@@ -436,7 +436,7 @@ class PyRexecSession:
                 except socket.timeout:
                     continue
                 except (IOError, socket.error) as e:
-                    self.session.logger.error('chan error: %r' % e)
+                    self.session.logger.error(f'chan error: {e!r}')
                     break
             self.session.logger.debug('chan end')
             self.pipe.close()
@@ -458,7 +458,7 @@ class PyRexecSession:
                 except socket.timeout:
                     continue
                 except (IOError, socket.error) as e:
-                    self.session.logger.error('pipe error: %r' % e)
+                    self.session.logger.error(f'pipe error: {e!r}')
                     break
             self.session.logger.debug('pipe end')
             self.pipe.close()
@@ -480,9 +480,9 @@ class PyRexecSession:
                 except socket.timeout:
                     continue
                 except (IOError, socket.error) as e:
-                    self.session.logger.error('chan error: %r' % e)
+                    self.session.logger.error(f'chan error: {e!r}')
                     break
-            self.session.logger.debug('recv: data=%r' % self._data)
+            self.session.logger.debug(f'recv: data={self._data!r}')
             self.recv(self._data)
             return
         def error(self, s):
@@ -501,7 +501,7 @@ class PyRexecSession:
             except UnicodeError:
                 self.error('encoding error')
             except pywintypes.error as e:
-                self.error('error: %r' % e)
+                self.error(f'error: {e!r}')
             return
 
     class FileOpener(DataReceiver):
@@ -516,7 +516,7 @@ class PyRexecSession:
             except UnicodeError:
                 self.error('encoding error')
             except pywintypes.error as e:
-                self.error('error: %r' % e)
+                self.error(f'error: {e!r}')
             return
 
 # get_host_key
@@ -559,7 +559,7 @@ def run_server(app, sock, hostkeys, username, pubkeys, homedir, cmdexe,
                msg='Listening...'):
     def update_text(n):
         if n:
-            app.set_text(msg + '\n(Clients: %d)' % n)
+            app.set_text(msg + f'\n(Clients: {n})')
         else:
             app.set_text(msg)
         return
@@ -605,7 +605,7 @@ def run_server(app, sock, hostkeys, username, pubkeys, homedir, cmdexe,
                 logging.error('Timeout')
                 t.close()
         except Exception as e:
-            logging.error('Error: %r' % e)
+            logging.error(f'Error: {e!r}')
             t.close()
     while sessions:
         session = sessions.pop()
@@ -616,9 +616,9 @@ def run_server(app, sock, hostkeys, username, pubkeys, homedir, cmdexe,
 def main(argv):
     import getopt
     def usage():
-        error('Usage: %s [-d] [-l logfile] [-s sshdir] [-L addr] [-p port]'
-              ' [-c cmdexe] [-u username] [-a authkeys] [-h homedir]'
-              ' ssh_host_key ...' % argv[0])
+        error(f'Usage: {argv[0]} [-d] [-l logfile] [-s sshdir] [-L addr]'
+              ' [-p port] [-c cmdexe] [-u username] [-a authkeys] [-h homedir]'
+              ' ssh_host_key ...')
         return 100
     try:
         (opts, args) = getopt.getopt(argv[1:], 'dl:s:L:p:u:a:h:c:')
@@ -652,7 +652,7 @@ def main(argv):
     except OSError:
         pass
     logging.basicConfig(level=loglevel, filename=logfile, filemode='a')
-    logging.info('Sshdir: %r' % sshdir)
+    logging.info(f'Sshdir: {sshdir!r}')
     hostkeys = []
     for path in args:
         if os.path.isfile(path):
@@ -665,10 +665,10 @@ def main(argv):
             key = paramiko.RSAKey.generate(2048)
             key.write_private_key_file(path)
             sig = ':'.join( '%02x' % b for b in key.get_fingerprint() )
-            logging.info('Hostkey is created: %r' % sig)
-            error('Hostkey is created: %r' % sig)
+            logging.info(f'Hostkey is created: {sig!r}')
+            error(f'Hostkey is created: {sig!r}')
             hostkeys.append(key)
-    logging.info('Hostkeys: %d' % len(hostkeys))
+    logging.info(f'Hostkeys: {len(hostkeys)}')
     if not authkeys:
         authkeys = [os.path.join(sshdir, 'authorized_keys')]
     pubkeys = []
@@ -680,10 +680,10 @@ def main(argv):
         logging.error('No authorized_keys found!')
         error('No authorized_keys found!')
         return
-    logging.info('Username: %r (pubkeys:%d)' % (username, len(pubkeys)))
-    logging.info('Homedir: %r' % homedir)
-    logging.info('Cmd.exe: %r' % cmdexe)
-    logging.info('Listening: %s:%s...' % (addr, port))
+    logging.info(f'Username: {username!r} (pubkeys:{len(pubkeys)})')
+    logging.info(f'Homedir: {homedir!r}')
+    logging.info(f'Cmd.exe: {cmdexe!r}')
+    logging.info(f'Listening: {addr}:{port}...')
     PyRexecTrayApp.initialize(os.path.dirname(__file__))
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -695,10 +695,10 @@ def main(argv):
         sock.settimeout(0.05)
         app = PyRexecTrayApp()
         run_server(app, sock, hostkeys, username, pubkeys, homedir, cmdexe,
-                   msg=('Listening: %s:%r...' % (addr, port)))
+                   msg=(f'Listening: {addr}:{port}...'))
     except (OSError, socket.error) as e:
-        logging.error('Error: %r' % e)
-        error('Error: %r' % e)
+        logging.error(f'Error: {e!r}')
+        error(f'Error: {e!r}')
     return
 
 if __name__ == '__main__': sys.exit(main(sys.argv))
