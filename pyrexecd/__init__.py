@@ -657,18 +657,21 @@ def main(argv):
     for path in args:
         if os.path.isfile(path):
             hostkeys.append(get_host_key(path))
-    if not hostkeys:
-        path = os.path.join(sshdir, 'ssh_host_ed25519_key')
+    for name in os.listdir(sshdir):
+        path = os.path.join(sshdir, name)
         if os.path.isfile(path):
-            hostkeys.append(get_host_key(path))
-        else:
-            # XXX paramiko does not support generating Ed25519 keys yet.
-            key = paramiko.RSAKey.generate(2048)
-            key.write_private_key_file(path)
-            sig = ':'.join( '%02x' % b for b in key.get_fingerprint() )
-            logging.info(f'Hostkey is created: {sig!r}')
-            error(f'Hostkey is created: {sig!r}')
-            hostkeys.append(key)
+            try:
+                hostkeys.append(get_host_key(path))
+            except ValueError:
+                pass
+    if not hostkeys:
+        # XXX paramiko does not support generating Ed25519 keys yet.
+        key = paramiko.RSAKey.generate(2048)
+        key.write_private_key_file(path)
+        sig = ':'.join( '%02x' % b for b in key.get_fingerprint() )
+        logging.info(f'Hostkey is created: {sig!r}')
+        error(f'Hostkey is created: {sig!r}')
+        hostkeys.append(key)
     logging.info(f'Hostkeys: {len(hostkeys)}')
     if not authkeys:
         authkeys = [os.path.join(sshdir, 'authorized_keys')]
