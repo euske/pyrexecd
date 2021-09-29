@@ -3,7 +3,7 @@ from setuptools import setup
 
 setup(
     name = 'PyRExecd',
-    version = '0.3.2',
+    version = '0.3.3',
     description = 'Standalone SSH server for Windows',
     url = 'https://github.com/euske/pyrexecd',
     author = 'Yusuke Shinyama',
