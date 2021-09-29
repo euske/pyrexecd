@@ -6,7 +6,7 @@
 #   Paramiko (https://github.com/paramiko/paramiko)
 
 # Usage:
-#   $ ssh-keygen -N '' -f ssh_host_rsa_key
+#   $ ssh-keygen -N '' -t ed25519 -f ssh_host_ed25519_key
 #   > python pyrexec.py
 
 import sys
@@ -658,10 +658,11 @@ def main(argv):
         if os.path.isfile(path):
             hostkeys.append(get_host_key(path))
     if not hostkeys:
-        path = os.path.join(sshdir, 'ssh_host_rsa_key')
+        path = os.path.join(sshdir, 'ssh_host_ed25519_key')
         if os.path.isfile(path):
             hostkeys.append(get_host_key(path))
         else:
+            # XXX paramiko does not support generating Ed25519 keys yet.
             key = paramiko.RSAKey.generate(2048)
             key.write_private_key_file(path)
             sig = ':'.join( '%02x' % b for b in key.get_fingerprint() )

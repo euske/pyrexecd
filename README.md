@@ -26,7 +26,7 @@ PyRexecd is a standalone SSH server for Windows.
      It generates a new host key and opens a config directory
      (`AppData\Roaming\PyRexecd`).
   1. Put your public key into the config dir. <br>
-    `> copy your\id_rsa.pub authorized_keys`
+    `> copy your\id_ed25519.pub authorized_keys`
   1. Run `PyRexec.pyw` to start the server.
   1. Log into the machine via 2200/tcp.<br>
     `$ ssh -p 2200 windows`
