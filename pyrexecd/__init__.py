@@ -21,12 +21,11 @@ import win32gui
 import win32gui_struct
 import win32clipboard
 import pywintypes
+import base64
 from win32com.shell import shell, shellcon
 from io import StringIO
 from subprocess import Popen, PIPE, STDOUT
 from threading import Thread
-from paramiko.py3compat import decodebytes
-
 
 def msgbox(text, caption='Error'):
     win32gui.MessageBox(None, text, caption,
@@ -550,7 +549,7 @@ def get_authorized_keys(path):
                 f = paramiko.Ed25519Key
             else:
                 continue
-            data = decodebytes(flds[1].encode('ascii'))
+            data = base64.decodebytes(flds[1].encode('ascii'))
             keys.append(f(data=data))
     return keys
 
@@ -665,7 +664,8 @@ def main(argv):
             except ValueError:
                 pass
     if not hostkeys:
-        # XXX paramiko does not support generating Ed25519 keys yet.
+        # XXX we want to generate a Ed25519 key by default, but it's not supported yet.
+        path = os.path.join(sshdir, 'ssh_host_rsa_key')
         key = paramiko.RSAKey.generate(2048)
         key.write_private_key_file(path)
         sig = ':'.join( '%02x' % b for b in key.get_fingerprint() )
